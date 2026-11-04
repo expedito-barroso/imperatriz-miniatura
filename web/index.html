@@ -1,0 +1,2423 @@
+<!doctype html>
+<!--
+==============================================================================
+Imperatriz em miniatura (estilo tiny city): web/index.html, cena 3D isométrica (three.js)
+Recorte: núcleo urbano de Imperatriz (MA), camadas geradas pelo script 03
+Fontes : Google Open Buildings V3 e 2.5D Temporal (2023); OpenStreetMap
+         (extrato Geofabrik); IBGE, Áreas Urbanizadas 2015
+
+Autor : Antonio Expedito Ferreira Barroso de Carvalho
+Filia : UEMASUL — Universidade Estadual da Região Tocantina do Maranhão
+Data  : novembro/2026
+three : 0.160.0 (via CDN jsDelivr)
+Email : expebarroso@uemasul.edu.br
+==============================================================================
+
+Objetivo desta página
+  Montar no navegador a maquete digital de Imperatriz a partir dos GeoJSON
+  de data/processed/cena/ (script 03):
+    edificações extrudadas até a altura de cena (h_cena), com cores por classe;
+    piso vetorial: calçadas, quadras, vias por pavimento, marcações, faixas de
+    pedestre, áreas verdes e água (com eixos.geojson; sem ele, chão em textura);
+    base em forma de diorama, câmera isométrica e relógio do dia que move a luz.
+
+Execução
+  A página lê arquivos locais com fetch(), o que o navegador só permite através
+  de um servidor. O script 04_servidor_cena.R liga esse servidor na raiz do
+  projeto e abre esta página em http://127.0.0.1:4321/web/index.html.
+  Abrir o arquivo com duplo clique (file://) não funciona.
+
+Controles
+  Botão esquerdo: girar   |   botão direito: arrastar   |   rodinha: zoom
+  Tecla H: modo vídeo (esconde a interface e deixa só a assinatura com os créditos).
+  Duplo clique numa edificação: classe, pavimentos, coordenadas e links (Esc fecha).
+  Painel inferior: hora do dia, reprodução automática e exagero vertical.
+-->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Imperatriz em miniatura</title>
+
+<style>
+  /* ----------------------------------------------------------------------------
+     Estilos da interface: tela cheia para a cena e painéis sobrepostos
+     ---------------------------------------------------------------------------- */
+  :root {
+    --painel-fundo: rgba(20, 24, 32, 0.78);
+    --painel-texto: #f2efe8;
+    --painel-suave: #b9b4a8;
+    --destaque: #ffd166;
+  }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a9d4ea;
+               font-family: system-ui, "Segoe UI", Roboto, sans-serif; color: var(--painel-texto); }
+  #cena { position: fixed; inset: 0; }
+
+  /* Título no canto superior esquerdo */
+  #titulo { position: fixed; top: 16px; left: 16px; padding: 10px 14px;
+            background: var(--painel-fundo); border-radius: 10px; }
+  #titulo h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: 0.2px; }
+  #titulo p  { margin: 2px 0 0; font-size: 12px; color: var(--painel-suave); }
+  #titulo .autoria { margin-top: 4px; font-size: 10.5px; opacity: 0.85; }
+  #creditos .ressalvas { margin-top: 6px; padding-top: 5px; border-top: 1px solid rgba(232, 228, 218, 0.25); }
+  #creditos .ressalvas div { margin-top: 3px; }
+  #creditos .assistencia { margin-top: 6px; padding-top: 5px; border-top: 1px solid rgba(232, 228, 218, 0.25); }
+
+  /* Mensagens de carregamento e erro, no centro */
+  #status { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            padding: 14px 18px; background: var(--painel-fundo); border-radius: 10px;
+            font-size: 14px; max-width: min(560px, 90vw); text-align: center; }
+  #status.erro { color: #ffb4a8; }
+
+  /* Painel de controles, embaixo ao centro */
+  #painel { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 18px; align-items: center; padding: 10px 16px;
+            background: var(--painel-fundo); border-radius: 12px; font-size: 13px;
+            max-width: calc(100vw - 32px); flex-wrap: wrap; justify-content: center; }
+  #relogio { font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 650;
+             color: var(--destaque); min-width: 64px; text-align: center; }
+  #painel label { display: flex; gap: 8px; align-items: center; color: var(--painel-suave); }
+  #painel input[type=range] { width: 160px; }
+  #painel button { background: #2e3646; color: var(--painel-texto); border: 1px solid #4a5468;
+                   border-radius: 8px; padding: 5px 10px; cursor: pointer; font-size: 13px; }
+  #painel button:hover { background: #3a4458; }
+
+  /* Créditos obrigatórios: um botão discreto no canto inferior direito, que
+     abre a lista completa de fontes e licenças ao ser clicado */
+  #botao-fontes { position: fixed; right: 12px; bottom: 16px; font-size: 12px;
+                  background: rgba(20, 24, 32, 0.55); color: #e8e4da; border: none;
+                  border-radius: 8px; padding: 5px 10px; cursor: pointer; }
+  #botao-fontes:hover { background: rgba(20, 24, 32, 0.8); }
+  /* Caixa de identificação (duplo clique numa edificação) */
+  #identificacao { position: fixed; z-index: 5; max-width: 300px; padding: 9px 11px;
+                   background: rgba(20, 24, 32, 0.92); color: #f2efe8; border-radius: 8px;
+                   font-size: 12px; line-height: 1.45; pointer-events: auto; }
+  #identificacao b { color: var(--destaque); }
+  #identificacao a { color: #9fd0ff; }
+  #identificacao .fechar { float: right; cursor: pointer; margin-left: 8px; opacity: 0.8; }
+  body.modo-video #identificacao { display: none !important; }
+  #creditos { position: fixed; right: 12px; bottom: 48px; max-width: 380px;
+              font-size: 10.5px; line-height: 1.35; color: #e8e4da;
+              background: rgba(20, 24, 32, 0.85); padding: 8px 10px; border-radius: 8px; }
+
+  /* O atributo hidden precisa vencer as regras de display acima; sem esta
+     linha, o painel aparecia antes de a cena ficar pronta */
+  [hidden] { display: none !important; }
+
+  /* Modo vídeo (tecla H): esconde título, painel e botão Fontes e mostra só
+     uma assinatura discreta com o autor e os créditos dos dados, que as
+     licenças (OSM, Open Buildings, Copernicus, Dynamic World) pedem em
+     qualquer obra derivada exibida, inclusive em vídeo */
+  #assinatura-video { position: fixed; left: 12px; bottom: 10px; font-size: 11px;
+                      color: rgba(255, 255, 255, 0.85); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+                      display: none; }
+  body.modo-video #titulo, body.modo-video #painel, body.modo-video #botao-fontes,
+  body.modo-video #creditos { display: none !important; }
+  body.modo-video #assinatura-video { display: block; }
+</style>
+
+<!-- Mapa de importação: aponta "three" e seus módulos auxiliares para a versão
+     0.160.0 no CDN jsDelivr. Exige internet na primeira abertura. -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+
+<body>
+<div id="cena"></div>
+
+<div id="titulo">
+  <h1>Imperatriz em miniatura</h1>
+  <p id="subtitulo">Maranhão, Brasil · alturas de 2023</p>
+  <!-- Assinatura do autor da página e da composição da cena. Os dados de
+       terceiros mantêm suas licenças, listadas no painel "Fontes". -->
+  <p class="autoria">© 2026 Expedito Barroso · expebarroso@uemasul.edu.br</p>
+</div>
+
+<div id="status">Carregando bibliotecas…</div>
+
+<div id="painel" hidden>
+  <div id="relogio">10:00</div>
+  <button id="botao-play" type="button">▶ Reproduzir dia</button>
+  <label>Hora
+    <input id="controle-hora" type="range" min="5" max="19" step="0.05" value="10">
+  </label>
+  <label>Exagero vertical
+    <input id="controle-exagero" type="range" min="1" max="6" step="0.5" value="2">
+    <span id="valor-exagero">2×</span>
+  </label>
+  <label><input id="controle-arvores" type="checkbox" checked> Árvores</label>
+  <label><input id="controle-nuvens"  type="checkbox" checked> Nuvens</label>
+  <label><input id="controle-nevoa"   type="checkbox" checked> Névoa</label>
+  <label><input id="controle-veiculos" type="checkbox" checked> Veículos</label>
+  <label><input id="controle-pixel" type="checkbox"> Pixel art</label>
+</div>
+
+<button id="botao-fontes" type="button" hidden>Fontes</button>
+<div id="identificacao" hidden></div>
+<div id="assinatura-video">Imperatriz em miniatura · © 2026 Expedito Barroso · dados: © colaboradores do OpenStreetMap, Google Open Buildings, Copernicus DEM, Dynamic World</div>
+<div id="creditos" hidden></div>
+
+<script type="module">
+// -----------------------------------------------------------------------------
+// 1. - Bibliotecas
+// -----------------------------------------------------------------------------
+
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+
+// -----------------------------------------------------------------------------
+// 2. - Parâmetros
+// -----------------------------------------------------------------------------
+
+// 2.1 - Dados
+// -----------------------------------------------------------------------------
+
+// Pasta dos GeoJSON, relativa a esta página (web/ fica na raiz do projeto)
+const CAMINHO_DADOS = '../data/processed/cena/';
+
+// Camadas obrigatórias e opcionais. As opcionais podem faltar quando o script
+// 03 não encontra feições (por exemplo, nenhuma área verde na AOI).
+const CAMADAS_OBRIGATORIAS = ['aoi', 'edificacoes', 'vias'];
+const CAMADAS_OPCIONAIS    = ['agua', 'verde', 'eixos', 'pedestres', 'quadras', 'faixas',
+                             'arvoredo', 'pistas', 'patios', 'rio'];
+
+// 2.2 - Aparência do chão
+// -----------------------------------------------------------------------------
+
+// Lado maior da textura do chão, em pixels. 4096 cobre a moldura de Imperatriz
+// (cerca de 20 km) com uns 5 m por pixel; 8192 dobra o detalhe e quadruplica a
+// memória de vídeo (cerca de 340 MB com mipmaps), arriscado em placas de 2 GB.
+const TEXTURA_PX = 4096;
+
+// Cores do chão (hexadecimal). Ordem de desenho: campo, área urbana, verde,
+// água e vias, da mais larga para a mais estreita por cima.
+const COR_CAMPO  = '#b7bd8f';   // fora da AOI: zona rural
+const COR_URBANO = '#d6cfb6';   // dentro da AOI: solo urbano
+const COR_VERDE  = '#86b765';   // verde do OSM quando não há arvoredo.geojson
+const COR_GRAMA     = '#a9c47c';   // gramados (OSM e Dynamic World), sem árvores
+const COR_ARVOREDO  = '#6f9f55';   // manchas de árvores do Dynamic World
+const COR_AGUA   = '#5f9fc6';
+const COR_VIAS = {              // por classe do OSM (coluna "classe")
+  service:       '#b2ada3',
+  living_street: '#a7a298',
+  residential:   '#a29d93',
+  unclassified:  '#a29d93',
+  tertiary:      '#8f8a82',
+  secondary:     '#7f7a73',
+  primary:       '#6f6b65',
+  trunk:         '#5e5a55'
+};
+const ORDEM_VIAS = ['service', 'living_street', 'residential', 'unclassified',
+                    'tertiary', 'secondary', 'primary', 'trunk'];
+
+// Espessura da base do diorama (metros, na escala da cena) e cor das laterais
+const ESPESSURA_BASE_M = 260;
+const COR_BASE = '#6e5640';
+
+// 2.2.1 - Piso vetorial (quando o script 03 gera eixos.geojson)
+// -----------------------------------------------------------------------------
+
+// Com os eixos das vias, o chão deixa de ser textura e passa a ser desenhado
+// em polígonos e faixas, nítidos em qualquer zoom (seção 4A). Sem eixos, a
+// página volta à textura da seção 4.
+//
+// Ordem de desenho, de baixo para cima: campo, calçada (a AOI inteira),
+// quadras, verde, água, caminhos de pedestre, vias por pavimento, marcações e
+// faixas de pedestre. A calçada aparece na faixa de CALCADA_M (script 03)
+// que sobra entre o leito da via e a quadra.
+const COR_CALCADA    = '#e2ddd2';
+const COR_QUADRA     = '#d3c9a8';
+const COR_PEDESTRE   = '#e9e0c9';
+const COR_PAVIMENTO  = {          // coluna "pavimento" dos eixos (opção A, script 03)
+  pavimentada: '#6b6b70',         // convenção: asfalto
+  bloquete:    '#a1978a',
+  terra:       '#b8845a'          // laterita
+};
+const ORDEM_PAVIMENTO = ['terra', 'bloquete', 'pavimentada'];   // asfalto por cima nos cruzamentos
+
+// Marcações no asfalto (coluna "marcacao"): linha central amarela tracejada
+// nas vias de mão dupla e divisória branca tracejada nas de mão única com
+// largura suficiente. A largura da linha é exagerada (a real tem 10 a 15 cm)
+// para ser visível no zoom máximo; é uma convenção visual, não um levantamento.
+const COR_MARCA_DUPLA   = '#f1c84b';
+const COR_MARCA_UNICA   = '#f4f3ee';
+const LARGURA_MARCA_M   = 0.45;
+const TRACO_M           = 4;      // comprimento do traço
+const VAO_M             = 5;      // espaço entre traços
+const LARGURA_MIN_DIVISORIA_M = 6;   // mão única mais estreita fica sem divisória
+
+// Faixas de pedestre (zebra): listras paralelas à via, cobrindo a largura
+const COR_ZEBRA       = '#f4f3ee';
+const ZEBRA_COMPR_M   = 3;        // extensão da faixa ao longo da via
+const ZEBRA_LISTRA_M  = 0.5;      // largura de cada listra
+const ZEBRA_PASSO_M   = 1.0;      // listra + intervalo
+
+// Curvas e pontas das vias: leque com este número de triângulos por meia volta
+const SEGMENTOS_CURVA = 6;
+
+// Aeroporto (pistas.geojson e patios.geojson): pavimento em cinza-concreto e
+// linha central tracejada branca na pista de pouso (traço de 30 m e
+// intervalo de 20 m, valores aproximados das pistas reais, sem levantamento)
+const COR_PISTA        = '#8d8c88';
+const COR_MARCA_PISTA  = '#f4f3ee';
+const LARGURA_EIXO_PISTA_M = 1;
+const TRACO_PISTA_M    = 30;
+const VAO_PISTA_M      = 20;
+
+// 2.3 - Aparência das edificações
+// -----------------------------------------------------------------------------
+
+// Paletas por classe (coluna "tipo"). Cada edificação recebe uma cor de
+// telhado e uma de parede sorteadas de forma determinística pelo seu id, de
+// modo que a cena é sempre igual entre aberturas.
+const PALETAS = {
+  casa: {
+    telhado: ['#c8643c', '#d9773f', '#b5523a', '#cf8a4f', '#a8a39a', '#8e8a83'],
+    parede:  ['#efe6d2', '#e8dcc2', '#f3ede0']
+  },
+  galpao: {
+    telhado: ['#b9c3c9', '#9fb3c2', '#c9c9c4'],
+    parede:  ['#cfd2d4', '#bfc4c7']
+  },
+  vertical: {
+    telhado: ['#e4e2dd', '#d3d1cc'],
+    parede:  ['#f4f1ea', '#dfe6ea', '#e9dcc8']
+  }
+};
+
+// Exagero vertical inicial. As alturas reais de Imperatriz (mediana de 5 m)
+// ficam quase invisíveis numa cena de 15 km; o exagero só escala a malha em Y.
+const EXAGERO_INICIAL = 2;
+
+// 2.4 - Relógio do dia
+// -----------------------------------------------------------------------------
+
+const HORA_INICIAL = 10;           // hora mostrada ao abrir
+const HORAS_POR_SEGUNDO = 0.25;    // velocidade da reprodução automática
+// Componente norte-sul do Sol. Imperatriz fica a cerca de 5,5° S; entre
+// outubro e fevereiro o Sol do meio-dia passa ao sul do zênite. Valor
+// positivo = luz vinda do sul. Aproximação visual, sem cálculo astronômico.
+const DESVIO_SOL_SUL = 0.25;
+
+// 2.5 - Luz nas fachadas
+// -----------------------------------------------------------------------------
+
+// Com o Sol alto, as paredes (verticais) recebem pouca luz direta e ficam
+// escuras. Duas luzes direcionais quase horizontais iluminam as fachadas:
+// uma do lado do observador inicial (sudeste) e outra, mais fraca, do lado
+// oposto, para que as fachadas continuem legíveis quando a cena é girada.
+const LUZ_FACHADA         = 0.9;
+const LUZ_FACHADA_OPOSTA  = 0.4;
+const ELEVACAO_FACHADA    = 0.35;   // inclinação dessas luzes (0 = horizontal)
+
+// 2.6 - Árvores
+// -----------------------------------------------------------------------------
+
+// Árvores em miniatura espalhadas ao acaso dentro das manchas de árvores do
+// Dynamic World (arvoredo.geojson, script 03, seção 8.4.1); sem essa camada,
+// dentro das áreas verdes do OSM. Os gramados ficam sem árvores.
+// A densidade é uma escolha visual, não um inventário arbóreo. A forma é a de
+// folhosa (copa arredondada, mais larga que alta), coerente com a vegetação da
+// transição Cerrado-Amazônia; os pontos que caem na água ou sobre edificações
+// são descartados (seção 5A.2.1).
+const ARVORES_POR_HECTARE = 25;          // uma árvore a cada 400 m²
+const MAX_ARVORES         = 40000;       // teto, para não pesar a cena
+const ALTURA_ARVORE_M     = [6, 12];     // altura total, sorteada por árvore
+const AFASTAMENTO_M       = 3;           // folga mínima entre árvore e edificação
+const CORES_COPA = ['#4f8f3a', '#5c9e41', '#3f7d33', '#6aa84a', '#457f36', '#7aa94e'];
+const COR_TRONCO = '#7a5a3c';
+const SEMENTE_ARVORES = 42;              // mesma semente = mesmas posições
+
+// 2.6.3 - Árvores na orla das lagoas
+// -----------------------------------------------------------------------------
+
+// As lagoas urbanas (partes da água com área entre os dois limites; o
+// Tocantins, muito maior, fica de fora) recebem uma fileira de árvores em
+// volta, na margem, onde não houver via nem edificação
+// 2.6.4 - Copas em cachos, sombras e tremor das folhas
+// -----------------------------------------------------------------------------
+
+// Cada copa é um cacho de bolotas facetadas (três arranjos diferentes,
+// sorteados por árvore), mais claras no alto e verde-azuladas embaixo. Cada
+// bolota treme com fase própria, além do balanço da árvore inteira (2.6.2).
+// A sombra de cada árvore é uma elipse escura no chão, deslocada para o lado
+// oposto ao Sol e esticada quando o Sol está baixo.
+const TREMOR_M          = 0.18;   // amplitude do tremor de cada bolota, no topo
+const FREQ_TREMOR       = 4.2;    // radianos por segundo (mais rápido que o balanço)
+const OPACIDADE_SOMBRA  = 0.28;   // sombras ao meio-dia; somem à noite
+const COR_COPA_TOPO     = '#ffffff';   // multiplicada pela cor sorteada da árvore
+const COR_COPA_BASE     = '#7f97a0';   // lado de baixo, verde-azulado após a multiplicação
+
+const AREA_MIN_LAGOA_HA   = 0.3;
+const AREA_MAX_LAGOA_HA   = 100;
+const ESPACAMENTO_ORLA_M  = 10;          // distância entre árvores ao longo da margem
+const AFASTAMENTO_ORLA_M  = 7;           // distância da margem (com variação de ±30%)
+
+// 2.6.1 - Palmeiras nas grandes áreas verdes
+// -----------------------------------------------------------------------------
+
+// Nas áreas verdes grandes, parte das árvores vira palmeira, em referência ao
+// babaçu (Attalea speciosa), comum no Maranhão. Forma estilizada: estipe alto
+// e fino e coroa de folhas arqueadas. Áreas menores (praças) ficam só com
+// folhosas. O limite de área é uma escolha visual.
+const AREA_MIN_PALMEIRAS_HA = 5;         // polígono verde com pelo menos 5 ha
+const PROPORCAO_PALMEIRAS   = 0.3;       // fração das árvores nesses polígonos
+const ALTURA_PALMEIRA_M     = [9, 16];   // altura total, sorteada por palmeira
+const N_FOLHAS_PALMEIRA     = 8;         // folhas na coroa
+const CORES_PALMEIRA = ['#6f9a3e', '#7da846', '#5e8a36', '#86ad4f'];
+const COR_ESTIPE     = '#8c7b63';
+
+// 2.6.2 - Vento nas árvores
+// -----------------------------------------------------------------------------
+
+// As árvores e palmeiras balançam: cada vértice é deslocado na horizontal,
+// mais no alto que na base (o tronco se curva, a copa acompanha), numa onda
+// lenta com rajadas. A fase depende da posição da árvore, para que vizinhas
+// não balancem em sincronia. Efeito visual, sem relação com o vento real.
+const AMPLITUDE_VENTO_M  = 0.6;    // deslocamento máximo no topo, em metros
+const ALTURA_REF_VENTO_M = 14;     // altura em que o deslocamento chega ao máximo
+const FREQ_VENTO         = 1.4;    // radianos por segundo (uma oscilação a cada ~4,5 s)
+const DIRECAO_VENTO_GRAUS = 40;    // de onde para onde o vento empurra (0 = leste, 90 = norte)
+
+// 2.7 - Nuvens e névoa
+// -----------------------------------------------------------------------------
+
+// Nuvens low-poly (esferas facetadas agrupadas) flutuando sobre as bordas da
+// maquete, longe do centro, para emoldurar a cidade sem escondê-la
+const N_NUVENS            = 12;
+const ALTITUDE_NUVENS_M   = [1200, 2200];
+const VELOCIDADE_NUVENS   = 60;          // metros da cena por segundo
+const SEMENTE_NUVENS      = 7;
+
+// Névoa linear: começa um pouco atrás do centro da cena e engrossa até o
+// fundo. Valores em frações da extensão da cena, medidos a partir da
+// distância da câmera ao centro.
+const NEVOA_INICIO = -0.2;
+const NEVOA_FIM    = 2.2;
+
+// 2.8 - Veículos
+// -----------------------------------------------------------------------------
+
+// Carros nas avenidas (classes com marcação), caminhões na rodovia (trunk,
+// a BR-010) e barcos no eixo do Tocantins. Os carros e caminhões seguem a
+// rede de eixos (eixos.geojson): ao fim de um trecho, escolhem um trecho
+// ligado, de preferência da mesma classe, respeitando a mão única; trafegam
+// pela direita. Quantidades e velocidades são escolhas visuais.
+const N_CARROS     = 500;
+const N_CAMINHOES  = 60;
+const N_BARCOS     = 10;
+const CLASSES_CARROS    = ['trunk', 'primary', 'secondary', 'tertiary'];
+const CLASSES_CAMINHOES = ['trunk'];          // sem trunk na cena, usa primary
+const VELOCIDADE_CARRO_MS    = [11, 17];      // metros por segundo (40 a 60 km/h)
+const VELOCIDADE_CAMINHAO_MS = [9, 13];
+const VELOCIDADE_BARCO_MS    = [3, 6];
+const ESCALA_TEMPO     = 2;     // acelera o tráfego para que o movimento se perceba
+const ESCALA_VEICULOS  = 1.5;   // aumenta os veículos (os reais somem na escala da cidade)
+const DESVIO_BARCO_M   = 150;   // afastamento máximo do eixo do rio
+const CORES_CARROS   = ['#e8e6e1', '#c9cbcf', '#2d2f33', '#b23a32', '#2f5d8c', '#d9b44a', '#7c8a91', '#ffffff'];
+const CORES_CARGAS   = ['#f2f2ee', '#d8dde2', '#c9573f', '#3f6e9c', '#e0b84b'];
+const CORES_BARCOS   = ['#f4f4f0', '#3f6e9c', '#c9573f', '#e9d9a6'];
+const SEMENTE_VEICULOS = 11;
+
+// 2.8.2 - Pixel art e zoom
+// -----------------------------------------------------------------------------
+
+// Filtro opcional (liga/desliga no painel): a cena é desenhada numa imagem
+// FATOR_PIXEL vezes menor que a tela e ampliada sem suavização; as cores
+// passam a NIVEIS_COR tons por canal, com pontilhado regular (matriz de Bayer
+// 4 x 4) nas transições, e os objetos ganham contorno escuro onde a
+// profundidade salta mais que SALTO_CONTORNO_M (borda de prédio, copa, veículo).
+const FATOR_PIXEL      = 3;
+const NIVEIS_COR       = 7;
+const SALTO_CONTORNO_M = 3;
+const ZOOM_MAXIMO      = 800;   // cerca de 35 pixels por metro numa tela de 1080 linhas
+
+// 2.8.3 - Brasões nas fachadas
+// -----------------------------------------------------------------------------
+
+// Cada brasão é uma placa com a imagem (PNG com fundo transparente, na pasta
+// web/) presa a uma parede de uma edificação. A edificação é localizada por
+// um ponto em UTM 23S dentro dela (o número da edificação muda quando o
+// script 03 é rodado de novo; o ponto não). Parede "rua": a voltada para a
+// via de carro mais próxima; "maior": a parede mais longa. A placa ocupa até
+// LARGURA_REL da largura da parede e ALTURA_REL da altura visível, mantém as
+// proporções da imagem e acompanha o exagero vertical sem se deformar.
+const BRASOES = [
+  // ponto clicado no telhado da edificação 70555 (contorno em L); o centro do
+  // L (224892 E, 9387609 N) cai sobre a edificação baixa no canto interno
+  { nome: 'UEMASUL', imagem: 'brasao_uemasul.png', utm_e: 224889, utm_n: 9387589,
+    parede: 'rua', largura_rel: 0.5, altura_rel: 0.6 }
+];
+
+// 2.8.1 - Avião
+// -----------------------------------------------------------------------------
+
+// Um avião repete o ciclo: aproximação pela rampa de planeio, toque e
+// corrida na pista do OSM (pistas.geojson, a pista de pouso mais longa),
+// meia-volta na cabeceira, decolagem no sentido oposto e subida até sumir.
+// Velocidades e ângulos aproximados de um jato regional; o tempo segue
+// ESCALA_TEMPO e o tamanho, ESCALA_VEICULOS.
+const AVIAO_VEL_POUSO_MS     = 70;    // cerca de 250 km/h na aproximação
+const AVIAO_VEL_DECOLAGEM_MS = 80;
+const AVIAO_RAMPA_GRAUS      = 3;     // rampa de planeio padrão
+const AVIAO_SUBIDA_GRAUS     = 8;
+const AVIAO_DIST_APROX_M     = 6000;  // início da aproximação, antes do toque
+const AVIAO_PAUSA_S          = 8;     // parado na cabeceira antes de decolar
+const AVIAO_INTERVALO_S      = 20;    // fora de vista entre dois ciclos
+
+
+// -----------------------------------------------------------------------------
+// 3. - Funções auxiliares
+// -----------------------------------------------------------------------------
+
+// 3.1 - Mensagens na tela
+// -----------------------------------------------------------------------------
+
+const elStatus = document.getElementById('status');
+
+// Mostra uma mensagem de andamento e devolve o controle ao navegador por um
+// quadro, para que a mensagem apareça antes das etapas demoradas
+async function avisar(texto) {
+  elStatus.textContent = texto;
+  elStatus.classList.remove('erro');
+  elStatus.hidden = false;
+  await new Promise(requestAnimationFrame);
+}
+
+function mostrarErro(texto) {
+  elStatus.textContent = texto;
+  elStatus.classList.add('erro');
+  elStatus.hidden = false;
+}
+
+// 3.2 - Leitura dos arquivos
+// -----------------------------------------------------------------------------
+
+// Lê um GeoJSON ou JSON. Camadas opcionais ausentes devolvem null.
+async function lerJSON(nome, opcional = false) {
+  const resposta = await fetch(CAMINHO_DADOS + nome);
+  if (!resposta.ok) {
+    if (opcional) return null;
+    throw new Error(`Não foi possível ler ${CAMINHO_DADOS}${nome} (HTTP ${resposta.status}).`);
+  }
+  return resposta.json();
+}
+
+// 3.3 - Percurso das geometrias
+// -----------------------------------------------------------------------------
+
+// Devolve a lista de polígonos de uma feição, cada polígono como lista de
+// anéis (o primeiro é o contorno externo, os demais são buracos). Aceita
+// Polygon e MultiPolygon; outros tipos são ignorados.
+function poligonosDe(feicao) {
+  const g = feicao.geometry;
+  if (!g) return [];
+  if (g.type === 'Polygon') return [g.coordinates];
+  if (g.type === 'MultiPolygon') return g.coordinates;
+  return [];
+}
+
+// Limites (xmin, ymin, xmax, ymax) de um conjunto de camadas, em metros locais
+function limitesDe(camadas) {
+  const lim = { xmin: Infinity, ymin: Infinity, xmax: -Infinity, ymax: -Infinity };
+  for (const camada of camadas) {
+    if (!camada) continue;
+    for (const f of camada.features) {
+      for (const pol of poligonosDe(f)) {
+        for (const anel of pol) {
+          for (const [x, y] of anel) {
+            if (x < lim.xmin) lim.xmin = x;
+            if (x > lim.xmax) lim.xmax = x;
+            if (y < lim.ymin) lim.ymin = y;
+            if (y > lim.ymax) lim.ymax = y;
+          }
+        }
+      }
+    }
+  }
+  return lim;
+}
+
+// 3.4 - Cores
+// -----------------------------------------------------------------------------
+
+// Converte '#rrggbb' em [r, g, b] de 0 a 255
+function rgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+// Paletas convertidas uma vez para [r, g, b]
+const PALETAS_RGB = Object.fromEntries(
+  Object.entries(PALETAS).map(([tipo, p]) =>
+    [tipo, { telhado: p.telhado.map(rgb), parede: p.parede.map(rgb) }])
+);
+
+// Escolha determinística: o id é espalhado por uma multiplicação de Knuth,
+// para que ids vizinhos não recebam cores em sequência
+function sortear(lista, id, semente) {
+  const k = (Math.imul(id + semente, 2654435761) >>> 0);
+  return lista[k % lista.length];
+}
+
+
+// 3.5 - Sorteio reprodutível
+// -----------------------------------------------------------------------------
+
+// Gerador pseudoaleatório mulberry32: a mesma semente produz sempre a mesma
+// sequência, de modo que árvores e nuvens ficam no mesmo lugar a cada abertura
+function sorteador(semente) {
+  let a = semente >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// 3.6 - Geometria plana
+// -----------------------------------------------------------------------------
+
+// Ponto dentro de polígono com buracos, pela regra par-ímpar (raio horizontal):
+// cada cruzamento de aresta inverte o estado
+function pontoDentro(x, y, aneis) {
+  let dentro = false;
+  for (const anel of aneis) {
+    for (let i = 0, j = anel.length - 1; i < anel.length; j = i++) {
+      const [xi, yi] = anel[i], [xj, yj] = anel[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) dentro = !dentro;
+    }
+  }
+  return dentro;
+}
+
+// Área de um anel pela fórmula do cadarço (valor absoluto, m²)
+function areaAnel(anel) {
+  let s = 0;
+  for (let i = 0, j = anel.length - 1; i < anel.length; j = i++) {
+    s += (anel[j][0] + anel[i][0]) * (anel[j][1] - anel[i][1]);
+  }
+  return Math.abs(s) / 2;
+}
+
+
+// -----------------------------------------------------------------------------
+// 4. - Chão: textura desenhada em canvas
+// -----------------------------------------------------------------------------
+
+// O chão é uma imagem: as vias chegam do script 03 como polígonos fundidos por
+// classe, com milhares de buracos (as quadras). Triangulá-los em 3D seria
+// lento; o canvas 2D do navegador preenche polígonos com buracos diretamente
+// (regra "evenodd").
+function desenharChao(dados, lim) {
+
+  // 4.1 - Tamanho do canvas proporcional à extensão da cena
+  const larguraM = lim.xmax - lim.xmin;
+  const alturaM  = lim.ymax - lim.ymin;
+  const escala   = TEXTURA_PX / Math.max(larguraM, alturaM);   // pixels por metro
+  const canvas   = document.createElement('canvas');
+  canvas.width   = Math.round(larguraM * escala);
+  canvas.height  = Math.round(alturaM * escala);
+  const ctx      = canvas.getContext('2d');
+
+  // 4.2 - Conversão de metros locais para pixels (o eixo y do canvas cresce
+  // para baixo; o norte fica em cima)
+  const px = x => (x - lim.xmin) * escala;
+  const py = y => (lim.ymax - y) * escala;
+
+  // 4.3 - Preenche todas as feições de uma camada com uma cor
+  function preencher(camada, cor, filtro = null) {
+    if (!camada) return;
+    const caminho = new Path2D();
+    for (const f of camada.features) {
+      if (filtro && !filtro(f)) continue;
+      for (const pol of poligonosDe(f)) {
+        for (const anel of pol) {
+          anel.forEach(([x, y], i) => i === 0 ? caminho.moveTo(px(x), py(y))
+                                              : caminho.lineTo(px(x), py(y)));
+          caminho.closePath();
+        }
+      }
+    }
+    ctx.fillStyle = cor;
+    ctx.fill(caminho, 'evenodd');
+  }
+
+  // 4.4 - Camadas, de baixo para cima
+  ctx.fillStyle = COR_CAMPO;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  preencher(dados.aoi,   COR_URBANO);
+  preencher(dados.verde, dados.arvoredo ? COR_GRAMA : COR_VERDE);
+  preencher(dados.arvoredo, COR_ARVOREDO);
+  preencher(dados.patios, COR_PISTA);
+  preencher(dados.agua,  COR_AGUA);
+  for (const classe of ORDEM_VIAS) {
+    preencher(dados.vias, COR_VIAS[classe], f => f.properties.classe === classe);
+  }
+
+  // 4.5 - Textura com mipmaps e filtragem anisotrópica, para não serrilhar as
+  // vias finas quando a câmera fica inclinada
+  const textura = new THREE.CanvasTexture(canvas);
+  textura.colorSpace = THREE.SRGBColorSpace;
+  textura.minFilter = THREE.LinearMipmapLinearFilter;
+  textura.generateMipmaps = true;
+  return textura;
+}
+
+
+// -----------------------------------------------------------------------------
+// 4A. - Piso vetorial: polígonos e faixas no plano do chão
+// -----------------------------------------------------------------------------
+
+// Cada camada do piso vira uma malha plana em y = 0. Como todas ficam no mesmo
+// plano, a sobreposição é resolvida pela ordem de desenho (renderOrder) e não
+// pela profundidade: as malhas do piso não gravam profundidade (depthWrite
+// false) e são desenhadas antes de tudo, de baixo para cima. As edificações e
+// as árvores, desenhadas depois, ficam sempre por cima do piso.
+
+// 4A.1 - Acumulador de triângulos (vértices em metros locais x, y)
+function novoAcumulador() {
+  return { pos: [], idx: [], nv: 0 };
+}
+
+// acrescenta um vértice (x leste, y norte) e devolve seu índice
+function verticePiso(ac, x, y) {
+  ac.pos.push(x, 0, -y);    // eixos da cena: X = leste, Y = altura, Z = sul
+  return ac.nv++;
+}
+
+// 4A.2 - Polígonos com buracos, triangulados pelo earcut do three.js
+function acumularPoligonos(ac, camada, filtro = null) {
+  if (!camada) return;
+  for (const f of camada.features) {
+    if (filtro && !filtro(f)) continue;
+    for (const pol of poligonosDe(f)) {
+      // anéis sem o ponto final repetido, como vetores 2D
+      const aneis = pol.map(anel => {
+        const [x0, y0] = anel[0], [xn, yn] = anel[anel.length - 1];
+        const a = (x0 === xn && y0 === yn) ? anel.slice(0, -1) : anel;
+        return a.map(([x, y]) => new THREE.Vector2(x, y));
+      });
+      if (aneis[0].length < 3) continue;
+      const triangulos = THREE.ShapeUtils.triangulateShape(aneis[0], aneis.slice(1));
+      // os índices do earcut se referem ao contorno seguido dos buracos
+      const inicio = ac.nv;
+      for (const anel of aneis) for (const p of anel) verticePiso(ac, p.x, p.y);
+      for (const [a, b, c] of triangulos) ac.idx.push(inicio + a, inicio + b, inicio + c);
+    }
+  }
+}
+
+// 4A.3 - Leque circular de raio r em (x, y), para pontas e curvas das vias
+function acumularDisco(ac, x, y, r) {
+  const centro = verticePiso(ac, x, y);
+  const n = 2 * SEGMENTOS_CURVA;
+  const primeiro = ac.nv;
+  for (let i = 0; i < n; i++) {
+    const t = i / n * 2 * Math.PI;
+    verticePiso(ac, x + r * Math.cos(t), y + r * Math.sin(t));
+  }
+  for (let i = 0; i < n; i++) ac.idx.push(centro, primeiro + i, primeiro + (i + 1) % n);
+}
+
+// 4A.4 - Retângulo de largura w centrado no segmento (x0, y0)-(x1, y1)
+function acumularRetangulo(ac, x0, y0, x1, y1, w) {
+  const dx = x1 - x0, dy = y1 - y0;
+  const comp = Math.hypot(dx, dy);
+  if (comp < 1e-6) return;
+  const nx = -dy / comp * w / 2, ny = dx / comp * w / 2;   // normal à esquerda
+  const a = verticePiso(ac, x0 + nx, y0 + ny);
+  const b = verticePiso(ac, x0 - nx, y0 - ny);
+  const c = verticePiso(ac, x1 - nx, y1 - ny);
+  const d = verticePiso(ac, x1 + nx, y1 + ny);
+  ac.idx.push(a, b, c, a, c, d);
+}
+
+// Lista de linhas (cada uma, lista de [x, y]) de uma feição LineString ou
+// MultiLineString
+function linhasDe(feicao) {
+  const g = feicao.geometry;
+  if (!g) return [];
+  if (g.type === 'LineString') return [g.coordinates];
+  if (g.type === 'MultiLineString') return g.coordinates;
+  return [];
+}
+
+// 4A.5 - Faixa de largura w ao longo de uma linha: um retângulo por segmento
+// e um disco em cada ponta e em cada vértice onde a linha muda de direção
+// (fecha a cunha aberta entre dois retângulos e arredonda os cruzamentos)
+function acumularFaixa(ac, linha, w) {
+  const n = linha.length;
+  if (n < 2) return;
+  for (let i = 0; i < n - 1; i++) {
+    const [x0, y0] = linha[i], [x1, y1] = linha[i + 1];
+    acumularRetangulo(ac, x0, y0, x1, y1, w);
+  }
+  acumularDisco(ac, linha[0][0], linha[0][1], w / 2);
+  acumularDisco(ac, linha[n - 1][0], linha[n - 1][1], w / 2);
+  for (let i = 1; i < n - 1; i++) {
+    const [xa, ya] = linha[i - 1], [xb, yb] = linha[i], [xc, yc] = linha[i + 1];
+    const t1 = Math.atan2(yb - ya, xb - xa), t2 = Math.atan2(yc - yb, xc - xb);
+    let giro = Math.abs(t2 - t1);
+    if (giro > Math.PI) giro = 2 * Math.PI - giro;
+    if (giro > 0.05) acumularDisco(ac, xb, yb, w / 2);   // acima de cerca de 3°
+  }
+}
+
+// 4A.6 - Linha tracejada ao longo de uma linha: o padrão traço + vão segue a
+// distância acumulada, de modo que o tracejado continua de um segmento ao outro
+function acumularTracejado(ac, linha, w, traco = TRACO_M, vao = VAO_M) {
+  const periodo = traco + vao;
+  let s = 0;   // distância acumulada no início do segmento
+  for (let i = 0; i < linha.length - 1; i++) {
+    const [x0, y0] = linha[i], [x1, y1] = linha[i + 1];
+    const comp = Math.hypot(x1 - x0, y1 - y0);
+    if (comp < 1e-6) continue;
+    const ux = (x1 - x0) / comp, uy = (y1 - y0) / comp;
+    // primeiro traço que alcança este segmento
+    let ini = Math.floor(s / periodo) * periodo;
+    while (ini < s + comp) {
+      const a = Math.max(ini, s) - s;
+      const b = Math.min(ini + traco, s + comp) - s;
+      if (b > a) acumularRetangulo(ac, x0 + ux * a, y0 + uy * a, x0 + ux * b, y0 + uy * b, w);
+      ini += periodo;
+    }
+    s += comp;
+  }
+}
+
+// 4A.7 - Faixa de pedestre: listras paralelas à via, espaçadas ao longo da
+// largura do leito. angulo = direção da via (radianos a partir do leste).
+function acumularZebra(ac, x, y, angulo, largura) {
+  const ux = Math.cos(angulo), uy = Math.sin(angulo);    // ao longo da via
+  const nx = -uy, ny = ux;                               // através da via
+  const n = Math.max(1, Math.floor(largura / ZEBRA_PASSO_M));
+  for (let k = 0; k < n; k++) {
+    const t = -largura / 2 + (k + 0.5) * largura / n;    // posição através da via
+    const cx = x + nx * t, cy = y + ny * t;
+    acumularRetangulo(ac,
+      cx - ux * ZEBRA_COMPR_M / 2, cy - uy * ZEBRA_COMPR_M / 2,
+      cx + ux * ZEBRA_COMPR_M / 2, cy + uy * ZEBRA_COMPR_M / 2, ZEBRA_LISTRA_M);
+  }
+}
+
+// 4A.8 - Malha de uma cor a partir de um acumulador, na posição "ordem" da
+// pilha do piso. flatShading calcula a normal no próprio shader (todas
+// apontam para cima); DoubleSide dispensa conferir a orientação dos triângulos.
+function malhaPiso(ac, cor, ordem) {
+  if (ac.nv === 0) return null;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(ac.pos, 3));
+  geo.setIndex(new THREE.BufferAttribute(new Uint32Array(ac.idx), 1));
+  geo.computeBoundingSphere();
+  const mat = new THREE.MeshStandardMaterial({
+    color: cor, roughness: 1, metalness: 0, flatShading: true,
+    side: THREE.DoubleSide, depthWrite: false
+  });
+  const malha = new THREE.Mesh(geo, mat);
+  malha.renderOrder = ordem;
+  return malha;
+}
+
+// 4A.9 - Piso completo. Devolve um grupo com uma malha por camada e cor, e a
+// contagem de triângulos (para conferência no console)
+function construirPiso(dados) {
+  const grupo = new THREE.Group();
+  let ordem = -90;   // abaixo de zero: antes das edificações e das árvores
+  let triangulos = 0;
+  function empilhar(ac, cor) {
+    const m = malhaPiso(ac, cor, ordem++);
+    if (m) { grupo.add(m); triangulos += ac.idx.length / 3; }
+  }
+
+  // superfícies
+  let ac = novoAcumulador(); acumularPoligonos(ac, dados.aoi);     empilhar(ac, COR_CALCADA);
+  ac = novoAcumulador();     acumularPoligonos(ac, dados.quadras); empilhar(ac, COR_QUADRA);
+  // com as manchas de árvores do Dynamic World, o verde restante é gramado
+  ac = novoAcumulador();     acumularPoligonos(ac, dados.verde);
+  empilhar(ac, dados.arvoredo ? COR_GRAMA : COR_VERDE);
+  ac = novoAcumulador();     acumularPoligonos(ac, dados.arvoredo); empilhar(ac, COR_ARVOREDO);
+  ac = novoAcumulador();     acumularPoligonos(ac, dados.agua);    empilhar(ac, COR_AGUA);
+
+  // aeroporto: pátios, pistas e taxiways, e a linha central da pista de pouso
+  ac = novoAcumulador();
+  acumularPoligonos(ac, dados.patios);
+  for (const f of dados.pistas?.features ?? []) {
+    for (const linha of linhasDe(f)) acumularFaixa(ac, linha, f.properties.largura);
+  }
+  empilhar(ac, COR_PISTA);
+  ac = novoAcumulador();
+  for (const f of dados.pistas?.features ?? []) {
+    if (f.properties.tipo !== 'runway') continue;
+    for (const linha of linhasDe(f)) {
+      acumularTracejado(ac, linha, LARGURA_EIXO_PISTA_M, TRACO_PISTA_M, VAO_PISTA_M);
+    }
+  }
+  empilhar(ac, COR_MARCA_PISTA);
+
+  // caminhos de pedestre e ciclovias (por baixo das vias de carro)
+  ac = novoAcumulador();
+  for (const f of dados.pedestres?.features ?? []) {
+    for (const linha of linhasDe(f)) acumularFaixa(ac, linha, f.properties.largura);
+  }
+  empilhar(ac, COR_PEDESTRE);
+
+  // leito das vias, uma malha por pavimento
+  for (const pav of ORDEM_PAVIMENTO) {
+    ac = novoAcumulador();
+    for (const f of dados.eixos.features) {
+      if (f.properties.pavimento !== pav) continue;
+      for (const linha of linhasDe(f)) acumularFaixa(ac, linha, f.properties.largura);
+    }
+    empilhar(ac, COR_PAVIMENTO[pav]);
+  }
+
+  // marcações: amarela nas vias de mão dupla, branca nas de mão única largas
+  const acDupla = novoAcumulador(), acUnica = novoAcumulador();
+  for (const f of dados.eixos.features) {
+    const p = f.properties;
+    if (p.marcacao === 'mao_dupla') {
+      for (const linha of linhasDe(f)) acumularTracejado(acDupla, linha, LARGURA_MARCA_M);
+    } else if (p.marcacao === 'mao_unica' && p.largura >= LARGURA_MIN_DIVISORIA_M) {
+      for (const linha of linhasDe(f)) acumularTracejado(acUnica, linha, LARGURA_MARCA_M);
+    }
+  }
+  empilhar(acDupla, COR_MARCA_DUPLA);
+  empilhar(acUnica, COR_MARCA_UNICA);
+
+  // faixas de pedestre mapeadas no OSM
+  ac = novoAcumulador();
+  for (const f of dados.faixas?.features ?? []) {
+    if (f.geometry?.type !== 'Point') continue;
+    const [x, y] = f.geometry.coordinates;
+    acumularZebra(ac, x, y, f.properties.angulo, f.properties.largura);
+  }
+  empilhar(ac, COR_ZEBRA);
+
+  return { grupo, triangulos };
+}
+
+
+// -----------------------------------------------------------------------------
+// 5. - Edificações: uma única malha com todas as extrusões
+// -----------------------------------------------------------------------------
+
+// Uma malha por edificação (117 mil objetos) travaria o navegador. Todas as
+// extrusões são escritas em um único BufferGeometry: três anéis de vértices
+// por edificação (base da parede, topo da parede, telhado), cores por vértice
+// em 8 bits e índices de 32 bits. O sombreamento facetado (flatShading)
+// dispensa normais por vértice.
+//
+// Simplificações: só o contorno externo é extrudado (buracos internos, raros
+// no Open Buildings, são ignorados) e todas as bases ficam em y = 0 (a cota
+// z_base do script 03 não é usada, porque o chão é plano).
+function construirEdificacoes(geojson) {
+
+  // 5.1 - Primeira passada: contornos válidos e contagem de vértices
+  const itens = [];
+  let totalVertices = 0;
+  let maxIndices = 0;
+  for (const f of geojson.features) {
+    const pol = poligonosDe(f)[0];
+    if (!pol) continue;
+    let anel = pol[0];
+    // remove o ponto final repetido que fecha o anel no GeoJSON
+    const [x0, y0] = anel[0], [xn, yn] = anel[anel.length - 1];
+    if (x0 === xn && y0 === yn) anel = anel.slice(0, -1);
+    const n = anel.length;
+    if (n < 3) continue;
+    itens.push({ anel, p: f.properties });
+    totalVertices += 3 * n;
+    maxIndices    += 6 * n + 3 * (n - 2);
+  }
+
+  // 5.2 - Vetores tipados do tamanho exato
+  const posicoes = new Float32Array(totalVertices * 3);
+  const cores    = new Uint8Array(totalVertices * 3);
+  const indices  = new Uint32Array(maxIndices);
+  let v = 0;    // próximo vértice livre
+  let k = 0;    // próximo índice livre
+
+  // grava um vértice (x, y no mapa; h = altura) com sua cor
+  function vertice(x, y, h, c) {
+    // eixos da cena: X = leste, Y = altura, Z = sul (norte em -Z)
+    posicoes[v * 3]     = x;
+    posicoes[v * 3 + 1] = h;
+    posicoes[v * 3 + 2] = -y;
+    cores[v * 3]     = c[0];
+    cores[v * 3 + 1] = c[1];
+    cores[v * 3 + 2] = c[2];
+    return v++;
+  }
+
+  // 5.3 - Segunda passada: paredes e telhados
+  for (const { anel, p } of itens) {
+    const n = anel.length;
+    const paleta  = PALETAS_RGB[p.tipo] ?? PALETAS_RGB.casa;
+    const cTelh   = sortear(paleta.telhado, p.id, 0);
+    const cParede = sortear(paleta.parede,  p.id, 7);
+    const h       = p.h_cena;
+
+    // anéis de vértices: base e topo da parede, e telhado
+    const base = v;
+    for (const [x, y] of anel) vertice(x, y, 0, cParede);
+    const topo = v;
+    for (const [x, y] of anel) vertice(x, y, h, cParede);
+    const telhado = v;
+    for (const [x, y] of anel) vertice(x, y, h, cTelh);
+
+    // paredes: um quadrilátero (dois triângulos) por aresta do contorno
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      indices[k++] = base + i; indices[k++] = base + j; indices[k++] = topo + j;
+      indices[k++] = base + i; indices[k++] = topo + j; indices[k++] = topo + i;
+    }
+
+    // telhado: triangulação do contorno (algoritmo earcut, embutido no three.js)
+    const contorno = anel.map(([x, y]) => new THREE.Vector2(x, y));
+    const triangulos = THREE.ShapeUtils.triangulateShape(contorno, []);
+    for (const [a, b, c] of triangulos) {
+      indices[k++] = telhado + a; indices[k++] = telhado + b; indices[k++] = telhado + c;
+    }
+  }
+
+  // 5.4 - Geometria e material
+  const geometria = new THREE.BufferGeometry();
+  geometria.setAttribute('position', new THREE.BufferAttribute(posicoes, 3));
+  geometria.setAttribute('color',    new THREE.BufferAttribute(cores, 3, true));
+  geometria.setIndex(new THREE.BufferAttribute(indices.subarray(0, k), 1));
+  geometria.computeBoundingSphere();
+
+  // DoubleSide: os contornos chegam com orientação variada (horário ou
+  // anti-horário); desenhar os dois lados evita paredes invisíveis
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true, flatShading: true, roughness: 0.92, metalness: 0,
+    side: THREE.DoubleSide
+  });
+
+  // 5.5 - Índice espacial para a identificação por clique (seção 6.10): cada
+  // edificação entra nas células de 50 m que o seu retângulo envolvente toca
+  const CELULA = 50;
+  const grade = new Map();
+  itens.forEach((it, i) => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of it.anel) {
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+    for (let cx = Math.floor(x0 / CELULA); cx <= Math.floor(x1 / CELULA); cx++) {
+      for (let cy = Math.floor(y0 / CELULA); cy <= Math.floor(y1 / CELULA); cy++) {
+        const chave = cx + '_' + cy;
+        if (!grade.has(chave)) grade.set(chave, []);
+        grade.get(chave).push(i);
+      }
+    }
+  });
+  const hMax = itens.reduce((m, it) => Math.max(m, it.p.h_cena), 0);
+
+  // devolve a edificação cujo contorno contém (x, y) e cuja altura alcança h
+  function edificacaoEm(x, y, h) {
+    const lista = grade.get(Math.floor(x / CELULA) + '_' + Math.floor(y / CELULA));
+    if (!lista) return null;
+    for (const i of lista) {
+      const it = itens[i];
+      if (it.p.h_cena >= h && pontoDentro(x, y, [it.anel])) return it;
+    }
+    return null;
+  }
+
+  // edificação mais próxima de (x, y), até raioMax metros (contornos em L ou
+  // em U podem ter o centro fora do próprio contorno)
+  function edificacaoProxima(x, y, raioMax = 30) {
+    const dentro = edificacaoEm(x, y, 0);
+    if (dentro) return dentro;
+    let melhor = null, dMin = raioMax;
+    const r = Math.ceil(raioMax / CELULA);
+    for (let cx = Math.floor(x / CELULA) - r; cx <= Math.floor(x / CELULA) + r; cx++) {
+      for (let cy = Math.floor(y / CELULA) - r; cy <= Math.floor(y / CELULA) + r; cy++) {
+        for (const i of grade.get(cx + '_' + cy) ?? []) {
+          const a = itens[i].anel;
+          for (let k = 0; k < a.length; k++) {
+            const [x0, y0] = a[k], [x1, y1] = a[(k + 1) % a.length];
+            const dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy || 1;
+            const t = Math.max(0, Math.min(1, ((x - x0) * dx + (y - y0) * dy) / l2));
+            const d = Math.hypot(x - x0 - t * dx, y - y0 - t * dy);
+            if (d < dMin) { dMin = d; melhor = itens[i]; }
+          }
+        }
+      }
+    }
+    return melhor;
+  }
+
+  return { malha: new THREE.Mesh(geometria, material), n: itens.length, edificacaoEm, edificacaoProxima, hMax };
+}
+
+
+// -----------------------------------------------------------------------------
+// 5A. - Árvores: duas malhas instanciadas (copas e troncos)
+// -----------------------------------------------------------------------------
+
+// 5A.0 - Vento: tempo compartilhado por todos os materiais das árvores, avançado
+// no laço de desenho (seção 8.2)
+const tempoVento = { value: 0 };
+
+// Sombras das árvores: deslocamento por metro de altura, atualizado pelo
+// relógio do dia (seção 7.2), e o material, cuja opacidade segue a luz
+const deslocSombra = { value: new THREE.Vector2(0.3, 0.2) };
+let materialSombra = null;
+
+// 5A.0.1 - Copa em cacho: bolotas facetadas [x, y, z, raio] num espaço de
+// raio ~1, com degradê de cor (claro no alto, escuro embaixo) e a fase de
+// tremor de cada bolota (atributo aFase)
+const ARRANJOS_COPA = [
+  [[0, 0.2, 0, 0.72], [0.5, -0.1, 0.15, 0.55], [-0.45, -0.05, -0.2, 0.58], [0.05, -0.15, -0.5, 0.5], [-0.15, -0.1, 0.5, 0.5]],
+  [[0, 0.15, 0, 0.8], [0.55, -0.15, -0.1, 0.5], [-0.5, -0.1, 0.25, 0.55], [0.1, 0, 0.55, 0.45]],
+  [[0.2, 0.1, 0.1, 0.65], [-0.3, 0.15, -0.15, 0.62], [0.35, -0.15, -0.4, 0.48], [-0.25, -0.2, 0.45, 0.5], [0, 0.45, 0, 0.45]]
+];
+function geometriaCacho(lobos) {
+  const topo = new THREE.Color(COR_COPA_TOPO), base = new THREE.Color(COR_COPA_BASE), c = new THREE.Color();
+  return mergeGeometries(lobos.map(([x, y, z, r], i) => {
+    const g = new THREE.IcosahedronGeometry(r, 0).translate(x, y, z);
+    const pos = g.attributes.position;
+    const cores = new Float32Array(pos.count * 3), fases = new Float32Array(pos.count);
+    for (let v = 0; v < pos.count; v++) {
+      c.copy(base).lerp(topo, THREE.MathUtils.smoothstep(pos.getY(v), -0.7, 0.8));
+      cores[v * 3] = c.r; cores[v * 3 + 1] = c.g; cores[v * 3 + 2] = c.b;
+      fases[v] = i * 1.9;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(cores, 3));
+    g.setAttribute('aFase', new THREE.BufferAttribute(fases, 1));
+    return g;
+  }));
+}
+const direcaoVento = new THREE.Vector2(
+  Math.cos(THREE.MathUtils.degToRad(DIRECAO_VENTO_GRAUS)),
+  -Math.sin(THREE.MathUtils.degToRad(DIRECAO_VENTO_GRAUS)));   // norte = -Z na cena
+
+// Acrescenta o balanço ao shader de um material de árvore. O deslocamento é
+// aplicado depois da matriz de cada cópia (instanceMatrix), em metros da
+// cena, e cresce com a altura do vértice: base parada, topo com a amplitude
+// toda. A fase vem da posição da árvore (coluna 3 da matriz).
+// Com tremor = true, a geometria traz o atributo aFase (fase de cada bolota
+// da copa, seção 5A.4) e cada bolota treme com fase própria. A chave de cache
+// separa as duas versões do shader, que de outro modo o three.js confundiria.
+function balancar(material, tremor = false) {
+  material.customProgramCacheKey = () => 'balanco' + (tremor ? '_tremor' : '');
+  material.onBeforeCompile = shader => {
+    shader.uniforms.uTempo = tempoVento;
+    shader.uniforms.uDirVento = { value: direcaoVento };
+    shader.vertexShader = `uniform float uTempo;\nuniform vec2 uDirVento;\n` +
+      (tremor ? 'attribute float aFase;\n' : '') +
+      shader.vertexShader.replace('#include <project_vertex>', `
+        vec4 mvPosition = vec4( transformed, 1.0 );
+        #ifdef USE_INSTANCING
+          mvPosition = instanceMatrix * mvPosition;
+          float fase   = instanceMatrix[3].x * 0.031 + instanceMatrix[3].z * 0.047;
+          float peso   = pow(clamp(mvPosition.y / ${ALTURA_REF_VENTO_M.toFixed(1)}, 0.0, 1.5), 1.5);
+          float rajada = 0.65 + 0.35 * sin(uTempo * 0.37 + fase * 0.5);
+          float desl   = ${AMPLITUDE_VENTO_M.toFixed(2)} * peso * rajada * sin(uTempo * ${FREQ_VENTO.toFixed(2)} + fase);
+          mvPosition.x += desl * uDirVento.x;
+          mvPosition.z += desl * uDirVento.y;
+          ${tremor ? `
+          float trem = ${TREMOR_M.toFixed(2)} * peso * sin(uTempo * ${FREQ_TREMOR.toFixed(2)} + fase * 3.0 + aFase);
+          mvPosition.x += trem * uDirVento.y;
+          mvPosition.z -= trem * uDirVento.x;
+          mvPosition.y += 0.4 * trem;` : ''}
+        #endif
+        mvPosition = modelViewMatrix * mvPosition;
+        gl_Position = projectionMatrix * mvPosition;`);
+  };
+  return material;
+}
+
+// Uma InstancedMesh desenha milhares de cópias da mesma forma numa única
+// chamada à placa de vídeo; cada cópia tem sua própria posição, escala e cor.
+function plantarArvores(verde, agua, edificacoes, eixos = null) {
+  const grupo = new THREE.Group();
+  if (!verde && !agua) return { grupo, n: 0, nPalmeiras: 0 };
+  const sortear01 = sorteador(SEMENTE_ARVORES);
+
+  // 5A.1 - Polígonos verdes, com área e retângulo envolvente
+  const alvos = [];
+  let areaTotal = 0;
+  for (const f of verde?.features ?? []) {
+    for (const aneis of poligonosDe(f)) {
+      const area = areaAnel(aneis[0]) - aneis.slice(1).reduce((s, a) => s + areaAnel(a), 0);
+      if (area <= 0) continue;
+      let xmin = Infinity, ymin = Infinity, xmax = -Infinity, ymax = -Infinity;
+      for (const [x, y] of aneis[0]) {
+        xmin = Math.min(xmin, x); xmax = Math.max(xmax, x);
+        ymin = Math.min(ymin, y); ymax = Math.max(ymax, y);
+      }
+      // grande = recebe palmeiras (seção 2.6.1)
+      const grande = area >= AREA_MIN_PALMEIRAS_HA * 10000;
+      alvos.push({ aneis, area, xmin, ymin, xmax, ymax, grande });
+      areaTotal += area;
+    }
+  }
+
+  // 5A.1.1 - Lagoas: contorno externo das partes da água com área entre os
+  // limites da seção 2.6.3
+  const lagoas = [];
+  for (const f of agua?.features ?? []) {
+    for (const aneis of poligonosDe(f)) {
+      const area = areaAnel(aneis[0]);
+      if (area >= AREA_MIN_LAGOA_HA * 1e4 && area <= AREA_MAX_LAGOA_HA * 1e4) lagoas.push(aneis[0]);
+    }
+  }
+
+  // 5A.2 - Quantidade: densidade por hectare, reduzida se passar do teto
+  let densidade = ARVORES_POR_HECTARE;
+  if (areaTotal / 10000 * densidade > MAX_ARVORES) densidade = MAX_ARVORES / (areaTotal / 10000);
+
+  // 5A.2.1 - Máscara de exclusão: um canvas que cobre só a extensão das áreas
+  // verdes, com a água e as edificações (mais AFASTAMENTO_M de folga)
+  // pintadas de preto. Consultar um pixel é instantâneo, ao passo que testar
+  // cada ponto contra o polígono do rio (milhares de vértices) seria lento.
+  let vx0 = Infinity, vy0 = Infinity, vx1 = -Infinity, vy1 = -Infinity;
+  for (const a of alvos) {
+    vx0 = Math.min(vx0, a.xmin); vx1 = Math.max(vx1, a.xmax);
+    vy0 = Math.min(vy0, a.ymin); vy1 = Math.max(vy1, a.ymax);
+  }
+  // a máscara também cobre a orla das lagoas
+  const folgaOrla = 2 * AFASTAMENTO_ORLA_M;
+  for (const anel of lagoas) {
+    for (const [x, y] of anel) {
+      vx0 = Math.min(vx0, x - folgaOrla); vx1 = Math.max(vx1, x + folgaOrla);
+      vy0 = Math.min(vy0, y - folgaOrla); vy1 = Math.max(vy1, y + folgaOrla);
+    }
+  }
+  if (!Number.isFinite(vx0)) return { grupo, n: 0, nPalmeiras: 0 };
+  // resolução: 2 m por pixel, limitada a 4096 pixels no lado maior
+  const escM = Math.min(0.5, 4096 / Math.max(vx1 - vx0, vy1 - vy0, 1));
+  const mascara = document.createElement('canvas');
+  mascara.width  = Math.max(1, Math.ceil((vx1 - vx0) * escM));
+  mascara.height = Math.max(1, Math.ceil((vy1 - vy0) * escM));
+  const mctx = mascara.getContext('2d', { willReadFrequently: true });
+  mctx.fillStyle = '#ffffff';
+  mctx.fillRect(0, 0, mascara.width, mascara.height);
+  const mx = x => (x - vx0) * escM;
+  const my = y => (vy1 - y) * escM;
+  // monta um caminho com todos os anéis das feições de uma camada
+  function caminhoDe(camada) {
+    const c = new Path2D();
+    if (!camada) return c;
+    for (const f of camada.features) {
+      for (const pol of poligonosDe(f)) {
+        for (const anel of pol) {
+          anel.forEach(([x, y], i) => i === 0 ? c.moveTo(mx(x), my(y)) : c.lineTo(mx(x), my(y)));
+          c.closePath();
+        }
+      }
+    }
+    return c;
+  }
+  mctx.fillStyle = mctx.strokeStyle = '#000000';
+  mctx.fill(caminhoDe(agua), 'evenodd');
+  const caminhoEdif = caminhoDe(edificacoes);
+  mctx.fill(caminhoEdif, 'nonzero');
+  mctx.lineWidth = Math.max(1, 2 * AFASTAMENTO_M * escM);   // folga dos dois lados do contorno
+  mctx.stroke(caminhoEdif);
+  // leito das vias de carro (piso vetorial): cada eixo é traçado com a sua
+  // largura, para que nenhuma árvore caia no asfalto; a calçada fica livre
+  mctx.lineCap = mctx.lineJoin = 'round';
+  for (const f of eixos?.features ?? []) {
+    const c = new Path2D();
+    for (const linha of linhasDe(f)) {
+      linha.forEach(([x, y], i) => i === 0 ? c.moveTo(mx(x), my(y)) : c.lineTo(mx(x), my(y)));
+    }
+    mctx.lineWidth = Math.max(1, f.properties.largura * escM);
+    mctx.stroke(c);
+  }
+  const pixels = mctx.getImageData(0, 0, mascara.width, mascara.height).data;
+  // devolve true se o ponto cai em área livre (pixel branco)
+  function livre(x, y) {
+    const c = Math.floor(mx(x)), r = Math.floor(my(y));
+    if (c < 0 || r < 0 || c >= mascara.width || r >= mascara.height) return false;
+    return pixels[(r * mascara.width + c) * 4] > 127;
+  }
+
+  // 5A.3 - Sorteio de posições: pontos ao acaso no retângulo envolvente de
+  // cada polígono verde, mantidos só os que caem dentro dele e em área livre
+  const pontos = [];           // folhosas
+  const pontosPalmeira = [];   // palmeiras (só nas áreas grandes)
+  for (const a of alvos) {
+    const meta = Math.round(a.area / 10000 * densidade);
+    let tentativas = 0;
+    let aceitos = 0;
+    while (aceitos < meta && tentativas < meta * 20) {
+      tentativas++;
+      const x = a.xmin + sortear01() * (a.xmax - a.xmin);
+      const y = a.ymin + sortear01() * (a.ymax - a.ymin);
+      if (livre(x, y) && pontoDentro(x, y, a.aneis)) {
+        // nas áreas grandes, cada ponto vira palmeira com a probabilidade definida
+        const palmeira = a.grande && sortear01() < PROPORCAO_PALMEIRAS;
+        (palmeira ? pontosPalmeira : pontos).push([x, y]);
+        aceitos++;
+      }
+    }
+  }
+  // 5A.3.1 - Orla das lagoas: um ponto a cada ESPACAMENTO_ORLA_M ao longo do
+  // contorno, empurrado para fora da água pela normal externa (que depende
+  // do sentido do anel: anti-horário tem o interior à esquerda)
+  for (const anel of lagoas) {
+    let a2 = 0;
+    for (let i = 0, j = anel.length - 1; i < anel.length; j = i++) {
+      a2 += anel[j][0] * anel[i][1] - anel[i][0] * anel[j][1];
+    }
+    const antiHorario = a2 > 0;
+    let d = 0;
+    for (let i = 0; i < anel.length - 1; i++) {
+      const [x0, y0] = anel[i], [x1, y1] = anel[i + 1];
+      const comp = Math.hypot(x1 - x0, y1 - y0);
+      if (comp < 1e-6) continue;
+      const ux = (x1 - x0) / comp, uy = (y1 - y0) / comp;
+      const nx = antiHorario ? uy : -uy, ny = antiHorario ? -ux : ux;   // para fora
+      while (d < comp) {
+        const af = AFASTAMENTO_ORLA_M * (0.7 + 0.6 * sortear01());
+        const x = x0 + ux * d + nx * af, y = y0 + uy * d + ny * af;
+        if (livre(x, y)) pontos.push([x, y]);
+        d += ESPACAMENTO_ORLA_M;
+      }
+      d -= comp;   // o que sobra passa para o segmento seguinte
+    }
+  }
+
+  const n = pontos.length;
+  const nPalmeiras = pontosPalmeira.length;
+  if (n + nPalmeiras === 0) return { grupo, n: 0, nPalmeiras: 0 };
+
+  // 5A.4 - Formas-base: icosaedro facetado (copa arredondada de folhosa,
+  // centrada na origem, raio 1) e cilindro fino (tronco, base em y = 0,
+  // altura 1), ambos escalados por árvore
+  const geoTronco = new THREE.CylinderGeometry(0.12, 0.16, 1, 5).translate(0, 0.5, 0);
+  const matCopa   = balancar(new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }), true);
+  const matTronco = balancar(new THREE.MeshStandardMaterial({ color: COR_TRONCO, roughness: 1 }));
+  // um arranjo de copa sorteado por árvore; uma malha instanciada por arranjo.
+  // InstancedMesh com zero cópias não é permitido; o mínimo é 1 e a contagem
+  // real fica em .count
+  const arranjo = pontos.map(() => Math.floor(sortear01() * ARRANJOS_COPA.length));
+  const copasPorArranjo = ARRANJOS_COPA.map((lobos, a) => {
+    const total = arranjo.filter(v => v === a).length;
+    const malha = new THREE.InstancedMesh(geometriaCacho(lobos), matCopa, Math.max(total, 1));
+    malha.count = total;
+    return malha;
+  });
+  const cursor = ARRANJOS_COPA.map(() => 0);
+  const troncos = new THREE.InstancedMesh(geoTronco, matTronco, Math.max(n, 1));
+  troncos.count = n;
+
+  // sombras: uma elipse por árvore e por palmeira; o shader as desloca para o
+  // lado oposto ao Sol, proporcionalmente à altura (guardada na escala Y)
+  materialSombra = new THREE.MeshBasicMaterial({ color: '#1d2b26', transparent: true,
+                                                 opacity: OPACIDADE_SOMBRA, depthWrite: false });
+  materialSombra.customProgramCacheKey = () => 'sombra_arvore';
+  materialSombra.onBeforeCompile = shader => {
+    shader.uniforms.uSombra = deslocSombra;
+    shader.vertexShader = 'uniform vec2 uSombra;\n' + shader.vertexShader.replace('#include <project_vertex>', `
+      vec4 mvPosition = vec4( transformed, 1.0 );
+      #ifdef USE_INSTANCING
+        mvPosition = instanceMatrix * mvPosition;
+        mvPosition.xz += uSombra * length(instanceMatrix[1].xyz) * 0.7;
+      #endif
+      mvPosition = modelViewMatrix * mvPosition;
+      gl_Position = projectionMatrix * mvPosition;`);
+  };
+  const sombras = new THREE.InstancedMesh(new THREE.CircleGeometry(1, 14).rotateX(-Math.PI / 2),
+                                          materialSombra, Math.max(n + nPalmeiras, 1));
+  sombras.count = n + nPalmeiras;
+  sombras.frustumCulled = false;
+
+  // 5A.5 - Matriz e cor de cada árvore (h = altura total): copa com raio
+  // horizontal de 40% de h e vertical de 30% de h, centrada a 70% de h; tronco
+  // até 50% de h, escondido na base da copa. O resultado é uma copa larga e
+  // achatada, mais larga que alta.
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const pos = new THREE.Vector3();
+  const esc = new THREE.Vector3();
+  const cor = new THREE.Color();
+  const [hmin, hmax] = ALTURA_ARVORE_M;
+  pontos.forEach(([x, y], i) => {
+    const h = hmin + sortear01() * (hmax - hmin);
+    const giro = sortear01() * Math.PI * 2;
+    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), giro);
+
+    m.compose(pos.set(x, 0, -y), q, esc.set(h * 0.6, h * 0.5, h * 0.6));
+    troncos.setMatrixAt(i, m);
+
+    // copa levemente irregular: cada eixo horizontal varia em até 15%
+    const rx = h * 0.40 * (0.85 + sortear01() * 0.3);
+    const rz = h * 0.40 * (0.85 + sortear01() * 0.3);
+    m.compose(pos.set(x, h * 0.70, -y), q, esc.set(rx, h * 0.30, rz));
+    const copas = copasPorArranjo[arranjo[i]];
+    const k = cursor[arranjo[i]]++;
+    copas.setMatrixAt(k, m);
+    copas.setColorAt(k, cor.set(CORES_COPA[Math.floor(sortear01() * CORES_COPA.length)]));
+
+    // sombra: elipse do tamanho da copa, com a altura da árvore na escala Y
+    m.compose(pos.set(x, 0.05, -y), q, esc.set(rx * 1.05, h, rz * 1.05));
+    sombras.setMatrixAt(i, m);
+  });
+  for (const copas of copasPorArranjo) {
+    copas.instanceMatrix.needsUpdate = true;
+    if (copas.instanceColor) copas.instanceColor.needsUpdate = true;
+  }
+  troncos.instanceMatrix.needsUpdate = true;
+  grupo.add(...copasPorArranjo, troncos, sombras);
+
+  // 5A.5.1 - Palmeiras: coroa de folhas arqueadas sobre estipe fino
+  if (nPalmeiras > 0) {
+
+    // forma da coroa, construída à mão: N_FOLHAS_PALMEIRA folhas em leque,
+    // cada uma com dois triângulos (base estreita, meio erguido, ponta
+    // caída), com raio 1 e origem no topo do estipe
+    const vertices = [];
+    for (let k = 0; k < N_FOLHAS_PALMEIRA; k++) {
+      const a = (k / N_FOLHAS_PALMEIRA) * Math.PI * 2;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const px = -sa, pz = ca;                         // direção perpendicular à folha
+      const larg = 0.13;                               // meia largura no meio da folha
+      const ponta = 0.15 * (k % 2 ? 1 : -1);           // folhas alternadas mais altas e mais baixas
+      const base = [0, 0.05, 0];
+      const mE = [0.55 * ca + px * larg, 0.18, 0.55 * sa + pz * larg];
+      const mD = [0.55 * ca - px * larg, 0.18, 0.55 * sa - pz * larg];
+      const fim = [ca, -0.35 + ponta, sa];
+      vertices.push(...base, ...mE, ...mD,   ...mE, ...fim, ...mD);
+    }
+    const geoCoroa = new THREE.BufferGeometry();
+    geoCoroa.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geoCoroa.computeVertexNormals();
+    const geoEstipe = new THREE.CylinderGeometry(0.035, 0.05, 1, 5).translate(0, 0.5, 0);
+
+    // DoubleSide: as folhas são lâminas sem espessura, vistas dos dois lados
+    const matCoroa  = balancar(new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.85, side: THREE.DoubleSide }));
+    const matEstipe = balancar(new THREE.MeshStandardMaterial({ color: COR_ESTIPE, roughness: 1 }));
+    const coroas  = new THREE.InstancedMesh(geoCoroa, matCoroa, nPalmeiras);
+    const estipes = new THREE.InstancedMesh(geoEstipe, matEstipe, nPalmeiras);
+
+    // estipe com a altura total; coroa no topo, com raio de 35% da altura e
+    // altura proporcional, girada ao acaso
+    const [pmin, pmax] = ALTURA_PALMEIRA_M;
+    pontosPalmeira.forEach(([x, y], i) => {
+      const h = pmin + sortear01() * (pmax - pmin);
+      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), sortear01() * Math.PI * 2);
+      m.compose(pos.set(x, 0, -y), q, esc.set(h, h, h));
+      estipes.setMatrixAt(i, m);
+      const r = h * 0.35;
+      m.compose(pos.set(x, h, -y), q, esc.set(r, r, r));
+      coroas.setMatrixAt(i, m);
+      m.compose(pos.set(x, 0.05, -y), q, esc.set(r * 0.8, h, r * 0.8));
+      sombras.setMatrixAt(n + i, m);
+      coroas.setColorAt(i, cor.set(CORES_PALMEIRA[Math.floor(sortear01() * CORES_PALMEIRA.length)]));
+    });
+    coroas.instanceMatrix.needsUpdate = true;
+    estipes.instanceMatrix.needsUpdate = true;
+    coroas.instanceColor.needsUpdate = true;
+    grupo.add(coroas, estipes);
+  }
+  sombras.instanceMatrix.needsUpdate = true;
+
+  return { grupo, n, nPalmeiras };
+}
+
+
+// -----------------------------------------------------------------------------
+// 5B. - Nuvens: grupos de esferas facetadas sobre as bordas da maquete
+// -----------------------------------------------------------------------------
+
+function criarNuvens(lim, extensao) {
+  const sortear01 = sorteador(SEMENTE_NUVENS);
+  const grupo = new THREE.Group();
+  const geo = new THREE.IcosahedronGeometry(1, 1);   // esfera low-poly
+  const mat = new THREE.MeshStandardMaterial({
+    color: '#ffffff', flatShading: true, roughness: 1,
+    transparent: true, opacity: 0.92
+  });
+  const cx = (lim.xmin + lim.xmax) / 2, cy = (lim.ymin + lim.ymax) / 2;
+  const [amin, amax] = ALTITUDE_NUVENS_M;
+
+  for (let i = 0; i < N_NUVENS; i++) {
+    // posição: ao redor do centro, a uma distância entre 45% e 75% da
+    // extensão, de modo que fiquem sobre as bordas e não sobre a cidade
+    const ang = sortear01() * Math.PI * 2;
+    const r = extensao * (0.45 + sortear01() * 0.3);
+    const nuvem = new THREE.Group();
+    nuvem.position.set(cx + Math.cos(ang) * r,
+                       amin + sortear01() * (amax - amin),
+                       -(cy + Math.sin(ang) * r));
+
+    // corpo: 5 a 8 esferas enfileiradas em x, achatadas em y
+    const nEsferas = 5 + Math.floor(sortear01() * 4);
+    const comprimento = 900 + sortear01() * 1100;
+    for (let k = 0; k < nEsferas; k++) {
+      const raio = 260 + sortear01() * 320;
+      const bola = new THREE.Mesh(geo, mat);
+      bola.position.set((k / (nEsferas - 1) - 0.5) * comprimento,
+                        sortear01() * 150,
+                        (sortear01() - 0.5) * 450);
+      bola.scale.set(raio, raio * 0.65, raio);
+      nuvem.add(bola);
+    }
+    grupo.add(nuvem);
+  }
+
+  // deriva: cada quadro, as nuvens andam para leste e reaparecem a oeste
+  const xmin = lim.xmin - extensao * 0.3, xmax = lim.xmax + extensao * 0.3;
+  function mover(dt) {
+    for (const nuvem of grupo.children) {
+      nuvem.position.x += VELOCIDADE_NUVENS * dt;
+      if (nuvem.position.x > xmax) nuvem.position.x = xmin;
+    }
+  }
+  return { grupo, mover };
+}
+
+
+// -----------------------------------------------------------------------------
+// 5C. - Veículos: carros, caminhões e barcos em movimento
+// -----------------------------------------------------------------------------
+
+// 5C.1 - Formas: caixas coloridas fundidas numa geometria por tipo. A cor de
+// cada parte (branco na carroceria, escuro nos vidros) é multiplicada pela
+// cor de cada cópia, de modo que a carroceria assume a cor sorteada.
+function caixa(comp, alt, larg, x, y, z, cor) {
+  const g = new THREE.BoxGeometry(comp, alt, larg).translate(x, y, z);
+  const c = new THREE.Color(cor);
+  const cores = new Float32Array(g.attributes.position.count * 3);
+  for (let i = 0; i < cores.length; i += 3) { cores[i] = c.r; cores[i + 1] = c.g; cores[i + 2] = c.b; }
+  g.setAttribute('color', new THREE.BufferAttribute(cores, 3));
+  return g;
+}
+
+// comprimento ao longo de +X (sentido de marcha), altura em Y, largura em Z
+const FORMAS_VEICULO = {
+  carro: () => mergeGeometries([
+    caixa(4.4, 0.9, 1.8,  0,    0.75, 0, '#ffffff'),    // carroceria
+    caixa(2.3, 0.7, 1.6, -0.2,  1.5,  0, '#3a4552')     // cabine envidraçada
+  ]),
+  caminhao: () => mergeGeometries([
+    caixa(11,  3.0, 2.5, -1.8,  2.0,  0, '#ffffff'),    // baú, na cor sorteada
+    caixa(2.6, 2.6, 2.4,  5.2,  1.8,  0, '#d9dde0'),    // cabine
+    caixa(0.2, 1.0, 2.0,  6.55, 2.3,  0, '#2d3540')     // para-brisa
+  ]),
+  barco: () => mergeGeometries([
+    caixa(11,  1.2, 3.6,  0,    0.4,  0, '#ffffff'),    // casco
+    caixa(3.6, 1.6, 2.6, -1.5,  1.8,  0, '#e9e6dc')     // cabine
+  ])
+};
+
+// 5C.2 - Rede de trechos: cada eixo vira uma polilinha com comprimentos
+// acumulados; as pontas dos trechos, arredondadas a 0,5 m, viram nós que
+// ligam um trecho aos vizinhos
+function chaveNo([x, y]) { return Math.round(x * 2) + '_' + Math.round(y * 2); }
+
+function montarRede(features, classes) {
+  const trechos = [];
+  for (const f of features) {
+    const p = f.properties ?? {};
+    if (classes && !classes.includes(p.classe)) continue;
+    for (const pts of linhasDe(f)) {
+      if (pts.length < 2) continue;
+      const acum = [0];
+      for (let i = 1; i < pts.length; i++) {
+        acum.push(acum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+      }
+      const comp = acum[acum.length - 1];
+      if (comp < 1) continue;
+      trechos.push({ pts, acum, comp, classe: p.classe, maoUnica: Boolean(p.mao_unica),
+                     largura: p.largura ?? 8, ini: chaveNo(pts[0]), fim: chaveNo(pts[pts.length - 1]) });
+    }
+  }
+  const nos = new Map();
+  trechos.forEach((t, i) => {
+    for (const [chave, ponta] of [[t.ini, 'ini'], [t.fim, 'fim']]) {
+      if (!nos.has(chave)) nos.set(chave, []);
+      nos.get(chave).push({ i, ponta });
+    }
+  });
+  const total = trechos.reduce((s, t) => s + t.comp, 0);
+  return { trechos, nos, total };
+}
+
+// ponto e direção a uma distância d do início da polilinha
+function pontoEm(t, d) {
+  const { pts, acum } = t;
+  let lo = 0, hi = acum.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (acum[m] <= d) lo = m; else hi = m; }
+  const seg = acum[hi] - acum[lo] || 1;
+  const f = Math.min(Math.max((d - acum[lo]) / seg, 0), 1);
+  const [x0, y0] = pts[lo], [x1, y1] = pts[hi];
+  return [x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, (x1 - x0) / seg, (y1 - y0) / seg];
+}
+
+// 5C.3 - Frota de um tipo: uma InstancedMesh e o estado de cada veículo
+function criarFrota(rede, n, forma, cores, velocidades, sortear01, opcoes = {}) {
+  if (!rede || rede.trechos.length === 0 || n === 0) return null;
+  const malha = new THREE.InstancedMesh(forma(),
+    new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6 }), n);
+  malha.frustumCulled = false;   // as cópias andam por toda a cena
+
+  // sorteio de um trecho com probabilidade proporcional ao comprimento
+  function trechoAoAcaso() {
+    let r = sortear01() * rede.total;
+    for (let i = 0; i < rede.trechos.length; i++) { r -= rede.trechos[i].comp; if (r <= 0) return i; }
+    return rede.trechos.length - 1;
+  }
+  function iniciar(v) {
+    v.i = trechoAoAcaso();
+    const t = rede.trechos[v.i];
+    v.sentido = t.maoUnica ? 1 : (sortear01() < 0.5 ? 1 : -1);
+    v.s = sortear01() * t.comp;
+    v.faixa = sortear01() < 0.5 ? -1 : 1;    // faixa usada nas vias de mão única largas
+  }
+
+  const veiculos = [];
+  const cor = new THREE.Color();
+  for (let k = 0; k < n; k++) {
+    const v = { vel: velocidades[0] + sortear01() * (velocidades[1] - velocidades[0]),
+                desvio: (sortear01() * 2 - 1) * (opcoes.desvio ?? 0) };
+    iniciar(v);
+    veiculos.push(v);
+    malha.setColorAt(k, cor.set(cores[Math.floor(sortear01() * cores.length)]));
+  }
+
+  // ao fim de um trecho: segue para um trecho ligado ao nó de chegada,
+  // de preferência da mesma classe; mão única só pela ponta inicial;
+  // sem saída, faz o retorno (mão dupla) ou reaparece em outro ponto
+  function proximo(v) {
+    const t = rede.trechos[v.i];
+    const no = v.sentido > 0 ? t.fim : t.ini;
+    const opcoesNo = (rede.nos.get(no) ?? []).filter(o => o.i !== v.i &&
+      !(rede.trechos[o.i].maoUnica && o.ponta === 'fim'));
+    const mesmaClasse = opcoesNo.filter(o => rede.trechos[o.i].classe === t.classe);
+    const lista = mesmaClasse.length ? mesmaClasse : opcoesNo;
+    if (lista.length) {
+      const o = lista[Math.floor(sortear01() * lista.length)];
+      v.i = o.i; v.sentido = o.ponta === 'ini' ? 1 : -1; v.s = 0;
+    } else if (!t.maoUnica) {
+      v.sentido = -v.sentido; v.s = 0;
+    } else {
+      iniciar(v); v.s = 0;
+    }
+  }
+
+  const obj = new THREE.Object3D();
+  obj.scale.setScalar(opcoes.escala ?? 1);
+  function mover(dt) {
+    for (let k = 0; k < n; k++) {
+      const v = veiculos[k];
+      v.s += v.vel * dt;
+      let guarda = 0;
+      while (v.s > rede.trechos[v.i].comp && guarda++ < 5) {
+        const sobra = v.s - rede.trechos[v.i].comp;
+        proximo(v);
+        v.s = Math.min(sobra, rede.trechos[v.i].comp);
+      }
+      const t = rede.trechos[v.i];
+      const d = v.sentido > 0 ? v.s : t.comp - v.s;
+      const [x, y, ux0, uy0] = pontoEm(t, d);
+      const ux = ux0 * v.sentido, uy = uy0 * v.sentido;
+      // deslocamento lateral: mão dupla, pela direita (um quarto da largura);
+      // mão única larga, numa das duas faixas; barcos, desvio fixo do eixo
+      let lado = v.desvio;
+      if (!opcoes.desvio) {
+        lado = t.maoUnica ? (t.largura >= 6 ? v.faixa * t.largura / 4 : 0) : t.largura / 4;
+      }
+      obj.position.set(x + uy * lado, 0, -(y - ux * lado));
+      obj.rotation.set(0, Math.atan2(uy, ux), 0);
+      obj.updateMatrix();
+      malha.setMatrixAt(k, obj.matrix);
+    }
+    malha.instanceMatrix.needsUpdate = true;
+  }
+  mover(0);
+  return { malha, mover, n };
+}
+
+// 5C.3.1 - Barcos sem rota: cada barco vai em linha reta até um ponto
+// sorteado na água, a 0,8 a 3,3 km de distância, desde que o trajeto inteiro
+// fique na água (conferido a cada 40 m); ao chegar, sorteia outro destino
+function criarBarcosLivres(aneis, n, forma, cores, velocidades, sortear01, escala) {
+  let xmin = Infinity, ymin = Infinity, xmax = -Infinity, ymax = -Infinity;
+  for (const [x, y] of aneis[0]) {
+    xmin = Math.min(xmin, x); xmax = Math.max(xmax, x);
+    ymin = Math.min(ymin, y); ymax = Math.max(ymax, y);
+  }
+  const naAgua = (x, y) => pontoDentro(x, y, aneis);
+  function trajetoNaAgua(xa, ya, xb, yb) {
+    const passos = Math.ceil(Math.hypot(xb - xa, yb - ya) / 40);
+    for (let i = 1; i <= passos; i++) {
+      const t = i / passos;
+      if (!naAgua(xa + (xb - xa) * t, ya + (yb - ya) * t)) return false;
+    }
+    return true;
+  }
+  function novoDestino(b) {
+    for (let t = 0; t < 40; t++) {
+      const ang = sortear01() * 2 * Math.PI, r = 800 + sortear01() * 2500;
+      const x = b.x + Math.cos(ang) * r, y = b.y + Math.sin(ang) * r;
+      if (naAgua(x, y) && trajetoNaAgua(b.x, b.y, x, y)) { b.ax = x; b.ay = y; return; }
+    }
+    b.espera = 2;   // sem destino possível agora; tenta de novo em 2 s
+  }
+
+  const barcos = [];
+  for (let k = 0; k < n; k++) {
+    for (let t = 0; t < 500; t++) {
+      const x = xmin + sortear01() * (xmax - xmin), y = ymin + sortear01() * (ymax - ymin);
+      if (naAgua(x, y)) {
+        const b = { x, y, ax: x, ay: y, rumo: 0, espera: 0,
+                    vel: velocidades[0] + sortear01() * (velocidades[1] - velocidades[0]) };
+        novoDestino(b);
+        barcos.push(b);
+        break;
+      }
+    }
+  }
+  if (barcos.length === 0) return null;
+
+  const malha = new THREE.InstancedMesh(forma(),
+    new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6 }), barcos.length);
+  malha.frustumCulled = false;
+  const cor = new THREE.Color();
+  barcos.forEach((b, k) => malha.setColorAt(k, cor.set(cores[Math.floor(sortear01() * cores.length)])));
+  const obj = new THREE.Object3D();
+  obj.scale.setScalar(escala);
+
+  function mover(dt) {
+    barcos.forEach((b, k) => {
+      if (b.espera > 0) { b.espera -= dt; if (b.espera <= 0) novoDestino(b); }
+      const dx = b.ax - b.x, dy = b.ay - b.y, dist = Math.hypot(dx, dy);
+      const passo = b.vel * dt;
+      if (dist <= passo) { b.x = b.ax; b.y = b.ay; if (b.espera <= 0) novoDestino(b); }
+      else { b.x += dx / dist * passo; b.y += dy / dist * passo; b.rumo = Math.atan2(dy, dx); }
+      obj.position.set(b.x, 0, -b.y);
+      obj.rotation.set(0, b.rumo, 0);
+      obj.updateMatrix();
+      malha.setMatrixAt(k, obj.matrix);
+    });
+    malha.instanceMatrix.needsUpdate = true;
+  }
+  mover(0);
+  return { malha, mover, n: barcos.length };
+}
+
+// 5C.3.2 - Avião: forma e ciclo de pouso e decolagem
+function criarAviao(pistas, escala) {
+  // pista de pouso mais longa; as pontas definem o eixo (A -> B no pouso)
+  let melhor = null, compMelhor = 0;
+  for (const f of pistas?.features ?? []) {
+    if (f.properties?.tipo !== 'runway') continue;
+    for (const pts of linhasDe(f)) {
+      const a = pts[0], b = pts[pts.length - 1];
+      const c = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (c > compMelhor) { compMelhor = c; melhor = [a, b]; }
+    }
+  }
+  if (!melhor || compMelhor < 800) return null;
+  const [[ax, ay], [bx, by]] = melhor;
+  const ux = (bx - ax) / compMelhor, uy = (by - ay) / compMelhor;
+  const rumoPouso = Math.atan2(uy, ux);
+
+  // forma: fuselagem, asas, estabilizadores e deriva (jato regional, ~35 m)
+  const forma = mergeGeometries([
+    caixa(34,  3.6, 3.6,   0,    3.2,  0,   '#f4f4f0'),   // fuselagem
+    caixa(3,   2.4, 3.0,  18,    3.0,  0,   '#f4f4f0'),   // nariz
+    caixa(5,   0.5, 34,    1,    2.6,  0,   '#dfe3e6'),   // asas
+    caixa(3,   0.4, 12,  -15,    4.6,  0,   '#dfe3e6'),   // estabilizador horizontal
+    caixa(4,   6.0, 0.5, -15,    7.5,  0,   '#2f5d8c'),   // deriva (cauda azul)
+    caixa(3.5, 1.6, 1.8,   2,    1.6,  6,   '#9aa3aa'),   // motor direito
+    caixa(3.5, 1.6, 1.8,   2,    1.6, -6,   '#9aa3aa')    // motor esquerdo
+  ]);
+  const malha = new THREE.Mesh(forma,
+    new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.5 }));
+  malha.scale.setScalar(escala);
+  malha.rotation.order = 'YZX';   // primeiro o rumo, depois o nariz para cima ou para baixo
+
+  // pontos do ciclo, em metros ao longo do eixo a partir de A
+  const toque  = 300;                               // toque a 300 m da cabeceira A
+  const parada = compMelhor - 300;                  // fim da corrida, 300 m antes de B
+  const hAprox = AVIAO_DIST_APROX_M * Math.tan(THREE.MathUtils.degToRad(AVIAO_RAMPA_GRAUS));
+  const vP = AVIAO_VEL_POUSO_MS, vD = AVIAO_VEL_DECOLAGEM_MS;
+  const corrida  = parada - toque;
+  const tAprox   = AVIAO_DIST_APROX_M / vP;
+  const tCorrida = 2 * corrida / vP;                // desaceleração uniforme até parar
+  const corridaDec = Math.min(1500, parada - 100);  // corrida de decolagem, de B para A
+  const tDec     = 2 * corridaDec / vD;
+  const subidaM  = AVIAO_DIST_APROX_M;
+  const tSubida  = subidaM / vD;
+  const fases = [tAprox, tCorrida, AVIAO_PAUSA_S, tDec, tSubida, AVIAO_INTERVALO_S];
+  const ciclo = fases.reduce((a, b) => a + b, 0);
+  const tanSubida = Math.tan(THREE.MathUtils.degToRad(AVIAO_SUBIDA_GRAUS));
+  let t = 0;
+
+  // posição a s metros de A ao longo do eixo, na altura h
+  function colocar(s, h, rumo, arfagem) {
+    malha.position.set(ax + ux * s, h, -(ay + uy * s));
+    malha.rotation.set(0, rumo, arfagem);
+  }
+
+  function mover(dt) {
+    t = (t + dt) % ciclo;
+    let r = t;
+    malha.visible = true;
+    if (r < fases[0]) {                                   // aproximação
+      const f = r / fases[0];
+      colocar(toque - AVIAO_DIST_APROX_M * (1 - f), hAprox * (1 - f), rumoPouso, 0.03);
+      return;
+    }
+    r -= fases[0];
+    if (r < fases[1]) {                                   // toque e corrida
+      const a = vP / fases[1];
+      colocar(toque + vP * r - 0.5 * a * r * r, 0, rumoPouso, 0);
+      return;
+    }
+    r -= fases[1];
+    if (r < fases[2]) {                                   // meia-volta na cabeceira
+      colocar(parada, 0, rumoPouso + Math.PI * Math.min(1, r / (fases[2] * 0.6)), 0);
+      return;
+    }
+    r -= fases[2];
+    const rumoDec = rumoPouso + Math.PI;
+    if (r < fases[3]) {                                   // corrida de decolagem
+      const a = vD / fases[3];
+      colocar(parada - 0.5 * a * r * r, 0, rumoDec, 0);
+      return;
+    }
+    r -= fases[3];
+    if (r < fases[4]) {                                   // subida
+      const d = vD * r;
+      colocar(parada - corridaDec - d, d * tanSubida, rumoDec, THREE.MathUtils.degToRad(AVIAO_SUBIDA_GRAUS));
+      return;
+    }
+    malha.visible = false;                                // intervalo fora de vista
+  }
+  mover(0);
+  return { malha, mover, n: 1 };
+}
+
+// 5C.4 - Todas as frotas
+function criarVeiculos(dados) {
+  const grupo = new THREE.Group();
+  const frotas = [];
+  const sortear01 = sorteador(SEMENTE_VEICULOS);
+  const eixos = dados.eixos?.features ?? [];
+
+  const redeCarros = montarRede(eixos, CLASSES_CARROS);
+  let redeCaminhoes = montarRede(eixos, CLASSES_CAMINHOES);
+  if (redeCaminhoes.trechos.length === 0) redeCaminhoes = montarRede(eixos, ['primary']);
+  const redeRio = dados.rio ? montarRede(dados.rio.features, null) : null;
+  // no rio não há mão única nem largura de via: o desvio lateral é fixo por barco
+  if (redeRio) redeRio.trechos.forEach(t => { t.maoUnica = false; });
+
+  // sem a camada do rio (script 03 anterior a 03/11/2026), os barcos navegam
+  // livremente dentro da maior parte da água (o Tocantins)
+  let barcosLivres = null;
+  if (!redeRio && dados.agua) {
+    let maior = null, areaMaior = 0;
+    for (const f of dados.agua.features) {
+      for (const aneis of poligonosDe(f)) {
+        const a = areaAnel(aneis[0]);
+        if (a > areaMaior) { areaMaior = a; maior = aneis; }
+      }
+    }
+    if (maior) barcosLivres = criarBarcosLivres(maior, N_BARCOS, FORMAS_VEICULO.barco, CORES_BARCOS,
+                                                VELOCIDADE_BARCO_MS, sortear01, ESCALA_VEICULOS);
+  }
+
+  for (const frota of [
+    criarAviao(dados.pistas, ESCALA_VEICULOS),
+    barcosLivres,
+    criarFrota(redeCarros,    N_CARROS,    FORMAS_VEICULO.carro,    CORES_CARROS, VELOCIDADE_CARRO_MS,    sortear01, { escala: ESCALA_VEICULOS }),
+    criarFrota(redeCaminhoes, N_CAMINHOES, FORMAS_VEICULO.caminhao, CORES_CARGAS, VELOCIDADE_CAMINHAO_MS, sortear01, { escala: ESCALA_VEICULOS }),
+    criarFrota(redeRio,       N_BARCOS,    FORMAS_VEICULO.barco,    CORES_BARCOS, VELOCIDADE_BARCO_MS,    sortear01, { escala: ESCALA_VEICULOS, desvio: DESVIO_BARCO_M })
+  ]) {
+    if (frota) { grupo.add(frota.malha); frotas.push(frota); }
+  }
+  return {
+    grupo,
+    contagem: frotas.map(f => f.n),
+    mover: dt => { for (const f of frotas) f.mover(dt * ESCALA_TEMPO); }
+  };
+}
+
+
+// -----------------------------------------------------------------------------
+// 5D. - Pixel art: desenho em resolução baixa, paleta reduzida e contorno
+// -----------------------------------------------------------------------------
+
+// A cena é desenhada num alvo de renderização FATOR_PIXEL vezes menor que a
+// tela, com textura de profundidade; um retângulo de tela cheia lê esse alvo
+// sem suavização, converte para sRGB, reduz as cores com pontilhado de Bayer e
+// escurece as bordas onde a profundidade salta. A câmera é ortográfica, então a
+// profundidade gravada já é linear entre near e far.
+function criarPixelArt(renderer, camera) {
+  const tamanho = () => [Math.max(1, Math.floor(window.innerWidth / FATOR_PIXEL)),
+                         Math.max(1, Math.floor(window.innerHeight / FATOR_PIXEL))];
+  const [w, h] = tamanho();
+  const alvo = new THREE.WebGLRenderTarget(w, h, {
+    minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
+    depthTexture: new THREE.DepthTexture(w, h)
+  });
+  alvo.depthTexture.minFilter = alvo.depthTexture.magFilter = THREE.NearestFilter;
+
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      tCor:   { value: alvo.texture },
+      tProf:  { value: alvo.depthTexture },
+      uRes:   { value: new THREE.Vector2(w, h) },
+      uNear:  { value: camera.near },
+      uFar:   { value: camera.far },
+      uSalto: { value: SALTO_CONTORNO_M },
+      uNiveis:{ value: NIVEIS_COR }
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+    fragmentShader: `
+      uniform sampler2D tCor; uniform sampler2D tProf;
+      uniform vec2 uRes; uniform float uNear, uFar, uSalto, uNiveis;
+      varying vec2 vUv;
+      float prof(vec2 uv) { return mix(uNear, uFar, texture2D(tProf, uv).x); }
+      float bayer(vec2 p) {
+        int x = int(mod(p.x, 4.0)), y = int(mod(p.y, 4.0));
+        float m[16] = float[16](0., 8., 2., 10., 12., 4., 14., 6., 3., 11., 1., 9., 15., 7., 13., 5.);
+        return m[x + y * 4] / 16.0 - 0.5;
+      }
+      void main() {
+        vec2 px = floor(vUv * uRes);
+        vec2 uv = (px + 0.5) / uRes;
+        vec3 c = texture2D(tCor, uv).rgb;
+        // linear -> sRGB (o alvo de renderização guarda cores lineares)
+        c = mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+        // contorno: este pixel está à frente de um vizinho por mais de uSalto metros
+        float d = prof(uv);
+        vec2 e = 1.0 / uRes;
+        float salto = max(max(prof(uv + vec2(e.x, 0.0)), prof(uv - vec2(e.x, 0.0))),
+                          max(prof(uv + vec2(0.0, e.y)), prof(uv - vec2(0.0, e.y)))) - d;
+        if (salto > uSalto) c *= 0.45;
+        // paleta reduzida com pontilhado regular
+        float n = uNiveis - 1.0;
+        c = floor(c * n + 0.5 + bayer(px) * 0.9) / n;
+        gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+      }`,
+    depthTest: false, depthWrite: false
+  });
+  const quadCena = new THREE.Scene();
+  quadCena.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+  const quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+  return {
+    ativo: false,
+    desenhar(cena) {
+      material.uniforms.uNear.value = camera.near;
+      material.uniforms.uFar.value = camera.far;
+      renderer.setRenderTarget(alvo);
+      renderer.render(cena, camera);
+      renderer.setRenderTarget(null);
+      renderer.render(quadCena, quadCamera);
+    },
+    redimensionar() {
+      const [w2, h2] = tamanho();
+      alvo.setSize(w2, h2);
+      material.uniforms.uRes.value.set(w2, h2);
+    }
+  };
+}
+
+
+// -----------------------------------------------------------------------------
+// 5E. - Identificação de uma edificação por duplo clique
+// -----------------------------------------------------------------------------
+
+// 5E.1 - UTM -> latitude e longitude (elipsoide GRS80 do SIRGAS 2000;
+// fórmulas inversas da projeção transversa de Mercator, Snyder 1987)
+function utmParaGeo(E, N, fuso, sul) {
+  const a = 6378137, f = 1 / 298.257222101, k0 = 0.9996;
+  const e2 = f * (2 - f), ep2 = e2 / (1 - e2);
+  const x = E - 500000, y = sul ? N - 10000000 : N;
+  const mu = y / k0 / (a * (1 - e2 / 4 - 3 * e2 ** 2 / 64 - 5 * e2 ** 3 / 256));
+  const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
+  const f1 = mu + (3 * e1 / 2 - 27 * e1 ** 3 / 32) * Math.sin(2 * mu)
+               + (21 * e1 ** 2 / 16 - 55 * e1 ** 4 / 32) * Math.sin(4 * mu)
+               + (151 * e1 ** 3 / 96) * Math.sin(6 * mu) + (1097 * e1 ** 4 / 512) * Math.sin(8 * mu);
+  const s = Math.sin(f1), c = Math.cos(f1), t = Math.tan(f1);
+  const C1 = ep2 * c * c, T1 = t * t;
+  const N1 = a / Math.sqrt(1 - e2 * s * s), R1 = a * (1 - e2) / (1 - e2 * s * s) ** 1.5;
+  const D = x / (N1 * k0);
+  const lat = f1 - (N1 * t / R1) * (D ** 2 / 2 - (5 + 3 * T1 + 10 * C1 - 4 * C1 ** 2 - 9 * ep2) * D ** 4 / 24
+              + (61 + 90 * T1 + 298 * C1 + 45 * T1 ** 2 - 252 * ep2 - 3 * C1 ** 2) * D ** 6 / 720);
+  const lon = (fuso * 6 - 183) * Math.PI / 180
+              + (D - (1 + 2 * T1 + C1) * D ** 3 / 6
+                 + (5 - 2 * C1 + 28 * T1 - 3 * C1 ** 2 + 8 * ep2 + 24 * T1 ** 2) * D ** 5 / 120) / c;
+  return [lat * 180 / Math.PI, lon * 180 / Math.PI];
+}
+
+// 5E.2 - Do clique à edificação: o raio da câmera desce em passos de 0,5 m
+// de altura, do topo da edificação mais alta até o chão; a primeira
+// edificação cujo contorno contém o ponto e cuja altura (com o exagero
+// vertical) o alcança é a que se vê no clique. Mostra a caixa e um marcador.
+function criarIdentificacao(cena, camera, renderer, edificacoes, edificacaoEm, hMax, metadados) {
+  const caixa = document.getElementById('identificacao');
+  const raio = new THREE.Raycaster(), ndc = new THREE.Vector2();
+  const origem = metadados?.origem_utm ?? null;
+  // fuso a partir do código EPSG do SIRGAS 2000 / UTM sul (31978 = 18S ... 31985 = 25S)
+  const codigo = parseInt(String(metadados?.crs_origem ?? 'EPSG:31983').split(':')[1], 10);
+  const fuso = codigo - 31960;
+
+  const marcador = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 1, 8).translate(0, 0.5, 0),
+                                  new THREE.MeshBasicMaterial({ color: '#ffd166' }));
+  marcador.visible = false;
+  cena.add(marcador);
+
+  function fechar() { caixa.hidden = true; marcador.visible = false; }
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') fechar(); });
+
+  return function (evento) {
+    ndc.set(evento.clientX / window.innerWidth * 2 - 1, -(evento.clientY / window.innerHeight) * 2 + 1);
+    raio.setFromCamera(ndc, camera);
+    const o = raio.ray.origin, d = raio.ray.direction;
+    if (d.y >= 0) return;
+    const exag = edificacoes.scale.y;
+    const t0 = (hMax * exag + 1 - o.y) / d.y, t1 = -o.y / d.y, passo = 0.5 / Math.abs(d.y);
+    let achada = null, cx = 0, cy = 0;
+    for (let t = t0; t <= t1 && !achada; t += passo) {
+      const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t;
+      achada = edificacaoEm(x, -z, y / exag);
+      if (achada) { cx = x; cy = -z; }
+    }
+    if (!achada) { fechar(); return; }
+
+    // as coordenadas são as do ponto clicado, que fica sempre dentro do
+    // contorno (o centro de um contorno em L pode cair fora dele)
+    const { p } = achada;
+    let linhaGeo = 'Coordenadas: origem UTM ausente em metadados_cena.json';
+    let links = '';
+    if (origem) {
+      const E = cx + origem.x, N = cy + origem.y;
+      const [lat, lon] = utmParaGeo(E, N, fuso, true);
+      const ll = `${lat.toFixed(6)},${lon.toFixed(6)}`;
+      linhaGeo = `Lat, lon: ${lat.toFixed(6)}, ${lon.toFixed(6)}<br>UTM ${fuso}S: ${E.toFixed(0)} E, ${N.toFixed(0)} N`;
+      links = `<br><a href="https://www.google.com/maps/search/?api=1&query=${ll}" target="_blank" rel="noopener">Google Maps</a>` +
+              ` · <a href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${ll}" target="_blank" rel="noopener">Street View</a>`;
+      window.ultimaEdificacao = { id: p.id, tipo: p.tipo, pav: p.pav, h_cena: p.h_cena, lat, lon, utm_e: E, utm_n: N };
+    }
+    caixa.innerHTML = `<span class="fechar" title="Fechar (Esc)">✕</span>` +
+      `<b>Edificação ${p.id}</b><br>` +
+      `Classe: ${p.tipo} · ${p.pav} pavimento(s)${p.imputado ? ' (altura imputada)' : ''}<br>` +
+      `Altura na cena: ${p.h_cena} m, sem o exagero vertical<br>${linhaGeo}${links}`;
+    caixa.hidden = false;
+    caixa.style.left = Math.min(evento.clientX + 14, window.innerWidth - 320) + 'px';
+    caixa.style.top  = Math.min(evento.clientY + 14, window.innerHeight - 160) + 'px';
+    caixa.querySelector('.fechar').addEventListener('click', fechar);
+
+    // marcador amarelo sobre o ponto clicado
+    marcador.position.set(cx, p.h_cena * exag, -cy);
+    marcador.scale.set(1, 12, 1);
+    marcador.visible = true;
+  };
+}
+
+
+// -----------------------------------------------------------------------------
+// 5F. - Brasões nas fachadas
+// -----------------------------------------------------------------------------
+
+function criarBrasoes(cena, renderer, edificacaoEm, metadados, eixos) {
+  const placas = [];
+  const origem = metadados?.origem_utm;
+  if (!origem) return { atualizar: () => {} };
+  const carregador = new THREE.TextureLoader();
+
+  // distância de um ponto (x, y) ao eixo de via mais próximo
+  function distVia(x, y) {
+    let melhor = Infinity;
+    for (const f of eixos?.features ?? []) {
+      for (const linha of linhasDe(f)) {
+        for (let i = 0; i < linha.length - 1; i++) {
+          const [x0, y0] = linha[i], [x1, y1] = linha[i + 1];
+          const dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy || 1;
+          const t = Math.max(0, Math.min(1, ((x - x0) * dx + (y - y0) * dy) / l2));
+          melhor = Math.min(melhor, Math.hypot(x - x0 - t * dx, y - y0 - t * dy));
+        }
+      }
+    }
+    return melhor;
+  }
+
+  for (const b of BRASOES) {
+    // 5F.1 - Edificação que contém o ponto ou, se ele cair fora de todas
+    // (contorno em L), a mais próxima dele até 30 m
+    const x = b.utm_e - origem.x, y = b.utm_n - origem.y;
+    const ed = edificacaoEm(x, y);
+    if (!ed) { console.warn(`Brasão ${b.nome}: nenhuma edificação até 30 m do ponto indicado.`); continue; }
+    const anel = ed.anel;
+
+    // 5F.2 - Paredes com a normal para fora (anel anti-horário: interior à esquerda)
+    let a2 = 0;
+    for (let i = 0, j = anel.length - 1; i < anel.length; j = i++) a2 += anel[j][0] * anel[i][1] - anel[i][0] * anel[j][1];
+    const sinal = a2 > 0 ? 1 : -1;
+    const paredes = anel.map((p0, i) => {
+      const p1 = anel[(i + 1) % anel.length];
+      const comp = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) || 1;
+      const nx = sinal * (p1[1] - p0[1]) / comp, ny = -sinal * (p1[0] - p0[0]) / comp;
+      const mx = (p0[0] + p1[0]) / 2, my = (p0[1] + p1[1]) / 2;
+      return { comp, nx, ny, mx, my };
+    }).filter(w => w.comp >= 3);
+
+    // 5F.3 - Escolha da parede: voltada para a rua ou a mais longa
+    let parede;
+    if (b.parede === 'rua' && eixos) {
+      parede = paredes.reduce((m, w) => {
+        const d = distVia(w.mx + w.nx * 3, w.my + w.ny * 3) - 0.02 * w.comp;   // desempate pela largura
+        return (!m || d < m.d) ? { ...w, d } : m;
+      }, null);
+    } else {
+      parede = paredes.reduce((m, w) => (!m || w.comp > m.comp) ? w : m, null);
+    }
+    if (!parede) continue;
+
+    // 5F.4 - Placa com a textura, 15 cm à frente da parede, girada para fora
+    const material = new THREE.MeshStandardMaterial({ transparent: true, alphaTest: 0.05, roughness: 0.8 });
+    const malha = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+    malha.rotation.y = Math.atan2(parede.nx, -parede.ny);
+    malha.visible = false;
+    cena.add(malha);
+    const placa = { malha, parede, h: ed.p.h_cena, b, aspecto: 1 };
+    placas.push(placa);
+    carregador.load(b.imagem, textura => {
+      textura.colorSpace = THREE.SRGBColorSpace;
+      textura.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      material.map = textura;
+      material.needsUpdate = true;
+      placa.aspecto = textura.image.height / textura.image.width;
+      malha.visible = true;
+      atualizar(placa.exag ?? EXAGERO_INICIAL);
+    }, undefined, () => console.warn(`Brasão ${b.nome}: imagem ${b.imagem} não encontrada em web/.`));
+  }
+
+  // 5F.5 - Tamanho e altura conforme o exagero vertical (proporções mantidas)
+  function atualizar(exag) {
+    for (const pl of placas) {
+      pl.exag = exag;
+      const hVis = pl.h * exag;
+      const larg = Math.min(pl.parede.comp * pl.b.largura_rel, hVis * pl.b.altura_rel / pl.aspecto);
+      const alt = larg * pl.aspecto;
+      pl.malha.scale.set(larg, alt, 1);
+      pl.malha.position.set(pl.parede.mx + pl.parede.nx * 0.15, hVis * 0.5, -(pl.parede.my + pl.parede.ny * 0.15));
+    }
+  }
+  return { atualizar, placas };
+}
+
+
+// -----------------------------------------------------------------------------
+// 6. - Cena, câmera, luzes e controles
+// -----------------------------------------------------------------------------
+
+async function principal() {
+
+  // 6.1 - Leitura dos dados
+  await avisar('Lendo as camadas da cena…');
+  const dados = {};
+  for (const nome of CAMADAS_OBRIGATORIAS) dados[nome] = await lerJSON(`${nome}.geojson`);
+  for (const nome of CAMADAS_OPCIONAIS)    dados[nome] = await lerJSON(`${nome}.geojson`, true);
+  const metadados = await lerJSON('metadados_cena.json', true);
+
+  // 6.2 - Extensão da cena: AOI, vias e água (a água vai até a moldura)
+  const lim = limitesDe([dados.aoi, dados.vias, dados.agua]);
+  const largura = lim.xmax - lim.xmin;
+  const profund = lim.ymax - lim.ymin;
+  const cx = (lim.xmin + lim.xmax) / 2;
+  const cy = (lim.ymin + lim.ymax) / 2;
+  const extensao = Math.max(largura, profund);
+
+  // 6.3 - Renderizador
+  const container = document.getElementById('cena');
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  container.appendChild(renderer.domElement);
+
+  const cena = new THREE.Scene();
+
+  // 6.4 - Câmera ortográfica: sem perspectiva, como numa vista isométrica.
+  // O enquadramento inicial mostra a extensão toda; o zoom altera camera.zoom.
+  const aspecto = () => window.innerWidth / window.innerHeight;
+  const meia = extensao * 0.62;
+  const camera = new THREE.OrthographicCamera(
+    -meia * aspecto(), meia * aspecto(), meia, -meia, 1, extensao * 20);
+  // posição isométrica clássica: 45° de azimute, cerca de 35° de elevação
+  const alvo = new THREE.Vector3(cx, 0, -cy);
+  camera.position.set(cx + extensao * 2, extensao * 2, -cy + extensao * 2);
+  camera.lookAt(alvo);
+
+  // 6.5 - Controles: girar, arrastar e aproximar, com limites de inclinação
+  const controles = new OrbitControls(camera, renderer.domElement);
+  controles.target.copy(alvo);
+  controles.enableDamping = true;
+  controles.screenSpacePanning = true;
+  controles.minPolarAngle = THREE.MathUtils.degToRad(15);
+  controles.maxPolarAngle = THREE.MathUtils.degToRad(75);
+  controles.minZoom = 0.6;
+  // zoom máximo profundo (seção 2.8.2): de perto se leem as marcações, as
+  // faixas de pedestre, os veículos e as copas
+  controles.maxZoom = ZOOM_MAXIMO;
+  controles.update();
+
+  // 6.6 - Luzes: hemisférica (céu e chão) e direcional (Sol, movida pelo relógio)
+  const luzCeu = new THREE.HemisphereLight(0xdfefff, 0x8a7a60, 1.0);
+  cena.add(luzCeu);
+  const sol = new THREE.DirectionalLight(0xfff4e0, 2.4);
+  sol.target.position.copy(alvo);
+  cena.add(sol, sol.target);
+
+  // luzes de fachada (seção 2.5): quase horizontais, uma do sudeste (lado da
+  // câmera inicial) e outra do noroeste; a intensidade acompanha o relógio
+  const fachada = new THREE.DirectionalLight(0xffffff, LUZ_FACHADA);
+  fachada.position.copy(alvo).add(new THREE.Vector3(1, ELEVACAO_FACHADA, 1).multiplyScalar(extensao));
+  fachada.target.position.copy(alvo);
+  const fachadaOposta = new THREE.DirectionalLight(0xffffff, LUZ_FACHADA_OPOSTA);
+  fachadaOposta.position.copy(alvo).add(new THREE.Vector3(-1, ELEVACAO_FACHADA, -1).multiplyScalar(extensao));
+  fachadaOposta.target.position.copy(alvo);
+  cena.add(fachada, fachada.target, fachadaOposta, fachadaOposta.target);
+
+  // 6.7 - Chão e base do diorama. Com eixos.geojson, piso vetorial (seção
+  // 4A) sobre um plano liso na cor do campo; sem ele, a textura da seção 4.
+  const pisoVetorial = Boolean(dados.eixos && dados.eixos.features.length > 0);
+  let triangulosPiso = 0;
+  let chao;
+  if (pisoVetorial) {
+    chao = new THREE.Mesh(
+      new THREE.PlaneGeometry(largura, profund).rotateX(-Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: COR_CAMPO, roughness: 1, metalness: 0, depthWrite: false })
+    );
+    chao.renderOrder = -95;   // primeiro da pilha do piso
+    await avisar('Montando o piso (quadras, calçadas, vias e faixas)…');
+    const piso = construirPiso(dados);
+    cena.add(piso.grupo);
+    triangulosPiso = piso.triangulos;
+  } else {
+    await avisar('Desenhando o chão (vias, água, áreas verdes)…');
+    const texturaChao = desenharChao(dados, lim);
+    texturaChao.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    chao = new THREE.Mesh(
+      new THREE.PlaneGeometry(largura, profund).rotateX(-Math.PI / 2),
+      new THREE.MeshStandardMaterial({ map: texturaChao, roughness: 1, metalness: 0 })
+    );
+  }
+  chao.position.set(cx, 0, -cy);
+  cena.add(chao);
+
+  // base: caixa logo abaixo do chão, com laterais em cor de terra; desenhada
+  // antes do piso, que não grava profundidade e por isso precisa vir depois
+  const base = new THREE.Mesh(
+    new THREE.BoxGeometry(largura, ESPESSURA_BASE_M, profund),
+    new THREE.MeshStandardMaterial({ color: COR_BASE, roughness: 1 })
+  );
+  base.position.set(cx, -ESPESSURA_BASE_M / 2 - 0.5, -cy);
+  base.renderOrder = -100;
+  cena.add(base);
+
+  // 6.8 - Edificações
+  await avisar(`Montando ${dados.edificacoes.features.length.toLocaleString('pt-BR')} edificações…`);
+  const { malha: edificacoes, n, edificacaoEm, edificacaoProxima, hMax } = construirEdificacoes(dados.edificacoes);
+  edificacoes.scale.y = EXAGERO_INICIAL;
+  cena.add(edificacoes);
+
+  // 6.8.1 - Árvores nas áreas verdes
+  await avisar('Plantando árvores nas áreas verdes…');
+  const { grupo: arvores, n: nArvores, nPalmeiras } =
+    plantarArvores(dados.arvoredo ?? dados.verde, dados.agua, dados.edificacoes, pisoVetorial ? dados.eixos : null);
+  cena.add(arvores);
+
+  // 6.8.1.1 - Veículos (só com o piso vetorial, que traz a rede de eixos)
+  const veiculos = pisoVetorial ? criarVeiculos(dados) : { grupo: new THREE.Group(), contagem: [], mover: () => {} };
+  cena.add(veiculos.grupo);
+
+  // 6.8.2 - Nuvens sobre as bordas
+  const nuvens = criarNuvens(lim, extensao);
+  cena.add(nuvens.grupo);
+
+  // 6.8.3 - Névoa: distâncias medidas a partir da câmera, cuja distância ao
+  // alvo não muda com o zoom (na câmera ortográfica o zoom não a aproxima)
+  const distCamera = camera.position.distanceTo(alvo);
+  const nevoa = new THREE.Fog(0xa9d4ea,
+    distCamera + NEVOA_INICIO * extensao, distCamera + NEVOA_FIM * extensao);
+  cena.fog = nevoa;
+
+  // 6.9 - Créditos e subtítulo a partir de metadados_cena.json
+  if (metadados) {
+    const elCred = document.getElementById('creditos');
+    // fontes e licenças dos dados (metadados_cena.json), seguidas da
+    // declaração de assistência no desenvolvimento
+    // [].concat aceita tanto lista quanto texto único (o jsonlite grava um
+    // vetor de tamanho 1 como texto); as ressalvas do piso só se aplicam ao
+    // piso vetorial
+    const ressalvas = pisoVetorial ? [].concat(metadados.ressalvas ?? []) : [];
+    elCred.innerHTML = [].concat(metadados.creditos ?? []).map(t => `<div>${t}</div>`).join('')
+      + (ressalvas.length
+          ? '<div class="ressalvas"><b>Ressalvas</b>' + ressalvas.map(t => `<div>${t}</div>`).join('') + '</div>'
+          : '')
+      + '<div class="assistencia">Desenvolvido com assistência Anthropic - Claude LLM Opus 5.5</div>';
+    // a lista começa fechada; o botão "Fontes" abre e fecha
+    const elBotaoFontes = document.getElementById('botao-fontes');
+    elBotaoFontes.hidden = false;
+    elBotaoFontes.addEventListener('click', () => { elCred.hidden = !elCred.hidden; });
+    document.getElementById('subtitulo').textContent =
+      `Maranhão, Brasil · alturas de ${metadados.ano_alturas ?? 2023}`;
+  }
+
+
+  // ---------------------------------------------------------------------------
+  // 7. - Relógio do dia
+  // ---------------------------------------------------------------------------
+
+  // 7.1 - Cores de céu e de luz ao longo do dia
+  const corNoite = new THREE.Color('#1c2440');
+  const corAurora = new THREE.Color('#e9a27a');
+  const corDia    = new THREE.Color('#a9d4ea');
+  const luzQuente = new THREE.Color('#ffb36b');
+  const luzBranca = new THREE.Color('#fff4e0');
+  const raio = extensao * 3;   // distância do Sol ao centro (só define a direção)
+
+  // 7.2 - Posição do Sol para uma hora decimal (5 a 19).
+  // Modelo simples: o Sol nasce a leste às 6 h, culmina às 12 h e se põe a
+  // oeste às 18 h, descrevendo meio círculo; DESVIO_SOL_SUL o inclina para o sul.
+  function aplicarHora(hora) {
+    const theta = (hora - 6) / 12 * Math.PI;
+    const elev  = Math.sin(theta);                    // altura do Sol (-1 a 1)
+    // 0 = noite, 1 = dia pleno; a transição ocupa o trecho em que o Sol está
+    // baixo (elevação de -0,05 a 0,35), que corresponde ao fim da tarde e ao amanhecer
+    const dia   = THREE.MathUtils.smoothstep(elev, -0.05, 0.35);
+
+    const dir = new THREE.Vector3(Math.cos(theta), Math.max(elev, 0.04), DESVIO_SOL_SUL).normalize();
+    sol.position.copy(alvo).addScaledVector(dir, raio);
+    sol.intensity = 2.6 * dia;
+    sol.color.copy(luzQuente).lerp(luzBranca, dia);
+    luzCeu.intensity = 0.35 + 0.85 * dia;
+    fachada.intensity       = LUZ_FACHADA        * (0.25 + 0.75 * dia);
+    fachadaOposta.intensity = LUZ_FACHADA_OPOSTA * (0.25 + 0.75 * dia);
+
+    // sombras das árvores: lado oposto ao Sol, mais longas com o Sol baixo
+    // (limitadas a 2,5 vezes a altura) e apagadas à noite
+    const alcance = 1 / Math.max(dir.y, 0.25);
+    deslocSombra.value.set(-dir.x, -dir.z).normalize().multiplyScalar(Math.min(alcance * Math.hypot(dir.x, dir.z), 2.5));
+    if (materialSombra) materialSombra.opacity = OPACIDADE_SOMBRA * dia;
+
+    // céu: noite → aurora → dia, com a aurora concentrada perto do horizonte
+    const fundo = dia < 0.35
+      ? corNoite.clone().lerp(corAurora, dia / 0.35)
+      : corAurora.clone().lerp(corDia, (dia - 0.35) / 0.65);
+    cena.background = fundo;
+    nevoa.color.copy(fundo);   // a névoa se funde com o céu
+    document.body.style.background = fundo.getStyle();
+
+    // relógio no formato HH:MM
+    const hh = Math.floor(hora), mm = Math.floor((hora - hh) * 60);
+    document.getElementById('relogio').textContent =
+      `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  }
+
+  // 7.3 - Controles do painel
+  const elHora    = document.getElementById('controle-hora');
+  const elExagero = document.getElementById('controle-exagero');
+  const elPlay    = document.getElementById('botao-play');
+  let hora = HORA_INICIAL;
+  let tocando = false;
+
+  elHora.addEventListener('input', () => { hora = parseFloat(elHora.value); aplicarHora(hora); });
+  elExagero.addEventListener('input', () => {
+    edificacoes.scale.y = parseFloat(elExagero.value);
+    brasoes.atualizar(parseFloat(elExagero.value));
+    document.getElementById('valor-exagero').textContent = `${elExagero.value}×`;
+  });
+  document.getElementById('controle-arvores').addEventListener('change', e => { arvores.visible = e.target.checked; });
+  document.getElementById('controle-nuvens').addEventListener('change',  e => { nuvens.grupo.visible = e.target.checked; });
+  document.getElementById('controle-nevoa').addEventListener('change',   e => { cena.fog = e.target.checked ? nevoa : null; });
+  document.getElementById('controle-veiculos').addEventListener('change', e => { veiculos.grupo.visible = e.target.checked; });
+  elPlay.addEventListener('click', () => {
+    tocando = !tocando;
+    elPlay.textContent = tocando ? '❚❚ Pausar' : '▶ Reproduzir dia';
+  });
+
+  aplicarHora(hora);
+
+
+  // ---------------------------------------------------------------------------
+  // 8. - Laço de desenho
+  // ---------------------------------------------------------------------------
+
+  // 7.4 - Pixel art: liga e desliga no painel (seção 2.8.2 e função 5D)
+  const pixelArt = criarPixelArt(renderer, camera);
+  document.getElementById('controle-pixel').addEventListener('change', e => { pixelArt.ativo = e.target.checked; });
+
+  // 7.6 - Brasões nas fachadas (seção 2.8.3)
+  const brasoes = criarBrasoes(cena, renderer, edificacaoProxima, metadados, pisoVetorial ? dados.eixos : null);
+
+  // 7.5 - Identificação por duplo clique (seção 6.10)
+  const identificar = criarIdentificacao(cena, camera, renderer, edificacoes, edificacaoEm, hMax, metadados);
+  renderer.domElement.addEventListener('dblclick', identificar);
+
+  // 8.1 - Ajuste ao redimensionar a janela
+  window.addEventListener('resize', () => {
+    camera.left = -meia * aspecto();
+    camera.right = meia * aspecto();
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    pixelArt.redimensionar();
+  });
+
+  // 8.2 - Cada quadro: avança o relógio (se em reprodução), atualiza os
+  // controles e desenha
+  const cronometro = new THREE.Clock();
+  renderer.setAnimationLoop(() => {
+    // dt limitado a 0,1 s: ao voltar de outra aba, o tráfego não dá um salto
+    const dt = Math.min(cronometro.getDelta(), 0.1);
+    tempoVento.value += dt;
+    if (veiculos.grupo.visible) veiculos.mover(dt);
+    if (tocando) {
+      hora += dt * HORAS_POR_SEGUNDO;
+      if (hora > 19) hora = 5;
+      elHora.value = hora;
+      aplicarHora(hora);
+    }
+    nuvens.mover(dt);
+    controles.update();
+    if (pixelArt.ativo) pixelArt.desenhar(cena);
+    else renderer.render(cena, camera);
+  });
+
+  elStatus.hidden = true;
+  document.getElementById('painel').hidden = false;
+
+  // tecla H: liga e desliga o modo vídeo (interface escondida, assinatura
+  // discreta); funciona com o teclado em português ou inglês, maiúscula ou não
+  window.addEventListener('keydown', e => {
+    if (e.key === 'h' || e.key === 'H') document.body.classList.toggle('modo-video');
+  });
+  // expõe um resumo para conferência no console do navegador (F12)
+  window.cenaInfo = { edificacoes: n, arvores: nArvores, palmeiras: nPalmeiras, extensao_m: Math.round(extensao), piso: pisoVetorial ? 'vetorial' : 'textura', triangulos_piso: triangulosPiso,
+                     veiculos: veiculos.contagem };
+  window.cenaControle = { camera, controles, veiculos: veiculos.grupo, brasoes: brasoes.placas };   // acesso à câmera pelo console, para conferências
+}
+
+// Executa e mostra qualquer falha na tela, em vez de deixar a página em branco
+principal().catch(err => {
+  console.error(err);
+  mostrarErro(`Erro ao montar a cena: ${err.message}`);
+});
+</script>
+</body>
+</html>

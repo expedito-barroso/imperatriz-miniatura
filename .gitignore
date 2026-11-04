@@ -1,0 +1,35 @@
+# Sessões e configurações locais do R e do RStudio
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj.user
+.Ruserdata
+
+# Dados brutos: baixados do Google Drive (GEE) e do Geofabrik; grandes e
+# reproduzíveis pelos scripts 00 e 02 e pela etapa 4.1 do tutorial
+data/raw/
+
+# Intermediários de inspeção e de verificação, grandes e reproduzíveis
+data/processed/cena_imperatriz_utm.gpkg
+data/processed/aoi_inspecao.gpkg
+data/processed/aoi_imperatriz_gee/
+data/processed/checkpoint*
+*.gpkg-journal
+*.gpkg-wal
+*.gpkg-shm
+
+# Vídeos (acima do limite do GitHub; publicados à parte)
+*.mp4
+*.mov
+
+# Sistema operacional
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Arquivos de trabalho na raiz do projeto, fora do repositório
+*.zip
+*.qgz
+*.docx
+/uemasul.png
+01_aoi_imperatriz_v0.R

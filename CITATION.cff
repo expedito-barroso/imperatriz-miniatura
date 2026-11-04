@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "Se usar este material, cite-o como abaixo."
+title: "Imperatriz em miniatura: maquete digital isométrica do núcleo urbano de Imperatriz (MA)"
+version: 1.0.0
+date-released: 2026-11-04
+license: MIT
+authors:
+  - family-names: "Barroso de Carvalho"
+    given-names: "Antonio Expedito Ferreira"
+    orcid: "https://orcid.org/0000-0002-2227-1659"
+    affiliation: "Universidade Estadual da Região Tocantina do Maranhão (UEMASUL)"
+    email: "expebarroso@uemasul.edu.br"
+repository-code: "https://github.com/expedito-barroso/imperatriz-miniatura"
+url: "https://expedito-barroso.github.io/imperatriz-miniatura/"
+keywords:
+  - Imperatriz
+  - Maranhão
+  - tiny city
+  - Open Buildings 2.5D
+  - OpenStreetMap
+  - Dynamic World
+  - three.js
+  - R

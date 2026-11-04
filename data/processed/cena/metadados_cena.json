@@ -1,0 +1,47 @@
+{
+  "titulo": "Imperatriz em miniatura",
+  "crs_origem": "EPSG:31983",
+  "origem_utm": {
+    "x": 227057,
+    "y": 9390395
+  },
+  "unidade": "metro",
+  "ano_alturas": 2023,
+  "parametros": {
+    "conf_min": 0.7,
+    "area_min_m2": 16,
+    "presenca_min": 0.5,
+    "cobertura_min_pix": 0.5,
+    "pe_direito_m": 3,
+    "alt_padrao_m": 3,
+    "galpao_area_min_m2": 800,
+    "galpao_pav_max": 2,
+    "vertical_pav_min": 4,
+    "telhado_m": 1.5,
+    "margem_agua_m": 4000,
+    "calcada_m": 2,
+    "fator_mao_unica": 0.6,
+    "usar_relevo": true,
+    "janela_relevo_pix": 5
+  },
+  "contagens": {
+    "edificacoes": 136824,
+    "imputadas": 19870,
+    "por_tipo": {
+      "casa": 135963,
+      "galpao": 390,
+      "vertical": 471
+    },
+    "altura_max_cena_m": 84,
+    "desnivel_max_m": 77.2581,
+    "km_eixos": 1193.3,
+    "km_por_pavimento": {
+      "bloquete": 0.8,
+      "pavimentada": 1133,
+      "terra": 59.5
+    },
+    "pct_pav_informado": 19.9
+  },
+  "ressalvas": ["Pavimento: o OpenStreetMap não permite distinguir com segurança asfalto, laterita e bloquete. Vias sem registro de pavimento (80.1% da extensão das vias de carro) aparecem como pavimentadas por convenção; terra e bloquete aparecem só onde o OSM os registra (59.5 km de terra).", "Calçadas (2 m) e quadras são derivadas das vias; larguras e marcações seguem convenção por classe de via, pois o OSM não informa o número de faixas na maior parte das vias.", "AOI: traçada pela densidade das edificações do Open Buildings V3 (script 01). A parte sudoeste do Conjunto Canto da Serra, ao sul do Sebastião Régis, fica fora da cena: as últimas casas do conjunto, provavelmente concluídas depois das imagens usadas pelo Open Buildings, não constam nos dados.", "Árvores e gramados: classificação Dynamic World de 2023 (classe mais frequente no ano, 10 m); manchas de árvores e de gramado com pelo menos 0.25 ha. As árvores da cena são ilustrativas (densidade convencional), não um inventário arbóreo."],
+  "creditos": ["Edificações: Google Open Buildings V3 e 2.5D Temporal (CC-BY 4.0)", "Relevo: produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved", "Vias, água, verde, ferrovia e aeroporto: © colaboradores do OpenStreetMap (ODbL)", "Árvores e gramados: Dynamic World V1, produzido para o Dynamic World Project pelo Google em parceria com a National Geographic Society e o World Resources Institute (CC-BY 4.0)", "Recorte: densidade das edificações do Open Buildings V3; limite municipal IBGE 2020, via geobr (Ipea)"]
+}
