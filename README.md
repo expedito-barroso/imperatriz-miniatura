@@ -1,5 +1,7 @@
 # Imperatriz em miniatura
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23962970.svg)](https://doi.org/10.5281/zenodo.23962970)
+
 Maquete digital isométrica, no estilo *tiny city*, do núcleo urbano de Imperatriz (Maranhão, Brasil): 136.824 edificações extrudadas até a altura estimada para 2023, sobre o piso vetorial das vias, quadras, calçadas, áreas verdes, água e aeroporto, com relógio do dia, árvores ao vento e veículos em movimento.
 
 **Ver a cena:** https://expedito-barroso.github.io/imperatriz-miniatura/
@@ -82,7 +84,12 @@ Conceito *tiny[city]*, como isometric.nyc (Andy Coenen), tiny.london (Boris Star
 
 ## Como citar
 
-Use o arquivo `CITATION.cff` (botão *Cite this repository* do GitHub). O DOI do Zenodo será acrescentado após o depósito da versão 1.0.0.
+CARVALHO, A. E. F. B. **Imperatriz em miniatura**: maquete digital isométrica do núcleo urbano de Imperatriz (MA). Versão 1.0.0. Zenodo, 2026. DOI: [10.5281/zenodo.23962971](https://doi.org/10.5281/zenodo.23962971).
+
+- DOI desta versão (1.0.0): [10.5281/zenodo.23962971](https://doi.org/10.5281/zenodo.23962971)
+- DOI de todas as versões (aponta sempre para a mais recente): [10.5281/zenodo.23962970](https://doi.org/10.5281/zenodo.23962970)
+
+O botão *Cite this repository* do GitHub gera a citação a partir do arquivo `CITATION.cff`.
 
 ## Autoria
 

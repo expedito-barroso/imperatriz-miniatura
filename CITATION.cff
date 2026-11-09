@@ -3,10 +3,18 @@ message: "Se usar este material, cite-o como abaixo."
 title: "Imperatriz em miniatura: maquete digital isométrica do núcleo urbano de Imperatriz (MA)"
 version: 1.0.0
 date-released: 2026-11-04
+doi: 10.5281/zenodo.23962970
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23962970
+    description: "DOI de todas as versões (aponta para a mais recente)"
+  - type: doi
+    value: 10.5281/zenodo.23962971
+    description: "DOI da versão 1.0.0"
 license: MIT
 authors:
-  - family-names: "Barroso de Carvalho"
-    given-names: "Antonio Expedito Ferreira"
+  - family-names: "Carvalho"
+    given-names: "Antonio Expedito Ferreira Barroso"
     orcid: "https://orcid.org/0000-0002-2227-1659"
     affiliation: "Universidade Estadual da Região Tocantina do Maranhão (UEMASUL)"
     email: "expebarroso@uemasul.edu.br"
