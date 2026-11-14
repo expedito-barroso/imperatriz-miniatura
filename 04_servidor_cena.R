@@ -75,7 +75,10 @@ dir_cena <- file.path(RAIZ, "data", "processed", "cena")
 obrigatorias <- c("aoi.geojson", "edificacoes.geojson", "vias.geojson")
 opcionais    <- c("agua.geojson", "verde.geojson", "metadados_cena.json",
                   # piso vetorial; sem eixos.geojson, a página usa o chão em textura
-                  "eixos.geojson", "pedestres.geojson", "quadras.geojson", "faixas.geojson")
+                  "eixos.geojson", "pedestres.geojson", "quadras.geojson", "faixas.geojson",
+                  # versão 1.1.0: vegetação pontual, estádio, riacho e bairros
+                  "verde_extra.geojson", "arvores_pontos.geojson", "campo.geojson",
+                  "riacho.geojson", "bairros.geojson", "bairros_pontos.geojson")
 
 faltam <- obrigatorias[!file.exists(file.path(dir_cena, obrigatorias))]
 if (length(faltam) > 0) {

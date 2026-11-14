@@ -1,0 +1,8 @@
+{
+"type": "FeatureCollection",
+"name": "campo",
+"xy_coordinate_resolution": 0.1,
+"features": [
+{ "type": "Feature", "properties": { "comprimento": 105.0, "largura": 67.7, "angulo": -2.471482243632741 }, "geometry": { "type": "Polygon", "coordinates": [ [ [ -2754.0, -1643.5 ], [ -2836.3, -1708.7 ], [ -2794.2, -1761.8 ], [ -2711.9, -1696.6 ], [ -2754.0, -1643.5 ] ] ] } }
+]
+}

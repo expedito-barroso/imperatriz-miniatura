@@ -8,7 +8,7 @@ Fontes : Google Open Buildings V3 e 2.5D Temporal (2023); OpenStreetMap
 
 Autor : Antonio Expedito Ferreira Barroso de Carvalho
 Filia : UEMASUL — Universidade Estadual da Região Tocantina do Maranhão
-Data  : novembro/2026
+Data  : novembro/2026 (versão 1.1.0)
 three : 0.160.0 (via CDN jsDelivr)
 Email : expebarroso@uemasul.edu.br
 ==============================================================================
@@ -30,8 +30,12 @@ Execução
 Controles
   Botão esquerdo: girar   |   botão direito: arrastar   |   rodinha: zoom
   Tecla H: modo vídeo (esconde a interface e deixa só a assinatura com os créditos).
-  Duplo clique numa edificação: classe, pavimentos, coordenadas e links (Esc fecha).
-  Painel inferior: hora do dia, reprodução automática e exagero vertical.
+  Duplo clique numa edificação: classe, pavimentos, bairro e via mais próxima (nomes
+  do OSM), coordenadas e links (Esc fecha).
+  Painel inferior: hora do dia, reprodução automática, exagero vertical, camadas,
+  pixel art (desligado, ao aproximar ou sempre) e tamanho do pixel, sombreamento
+  de contato, contornos das copas, câmera em perspectiva e os botões Norte e
+  Grade (orientação da vista).
 -->
 <html lang="pt-BR">
 <head>
@@ -70,16 +74,22 @@ Controles
   #status.erro { color: #ffb4a8; }
 
   /* Painel de controles, embaixo ao centro */
-  #painel { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
-            display: flex; gap: 18px; align-items: center; padding: 10px 16px;
-            background: var(--painel-fundo); border-radius: 12px; font-size: 13px;
-            max-width: calc(100vw - 32px); flex-wrap: wrap; justify-content: center; }
-  #relogio { font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 650;
+  #painel { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 6px 13px; align-items: center; padding: 7px 14px;
+            background: var(--painel-fundo); border-radius: 12px; font-size: 12px;
+            max-width: calc(100vw - 150px); width: max-content;
+            flex-wrap: wrap; justify-content: center; }
+  #painel .quebra { flex-basis: 100%; height: 0; }
+  #relogio { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 650;
              color: var(--destaque); min-width: 64px; text-align: center; }
-  #painel label { display: flex; gap: 8px; align-items: center; color: var(--painel-suave); }
-  #painel input[type=range] { width: 160px; }
+  #painel label { display: flex; gap: 5px; align-items: center; color: var(--painel-suave); }
+  #painel input[type=range] { width: 130px; }
+  #painel input[type=checkbox] { margin: 0; }
+  #painel #controle-tam-pixel { width: 70px; }
+  #painel select { background: #2e3646; color: var(--painel-texto); border: 1px solid #4a5468;
+                   border-radius: 6px; padding: 2px 4px; font-size: 12px; }
   #painel button { background: #2e3646; color: var(--painel-texto); border: 1px solid #4a5468;
-                   border-radius: 8px; padding: 5px 10px; cursor: pointer; font-size: 13px; }
+                   border-radius: 8px; padding: 4px 9px; cursor: pointer; font-size: 12px; }
   #painel button:hover { background: #3a4458; }
 
   /* Créditos obrigatórios: um botão discreto no canto inferior direito, que
@@ -151,11 +161,27 @@ Controles
     <input id="controle-exagero" type="range" min="1" max="6" step="0.5" value="2">
     <span id="valor-exagero">2×</span>
   </label>
+  <button id="botao-norte" type="button" title="Gira a vista com o norte para cima">Norte</button>
+  <button id="botao-grade" type="button" title="Volta à vista alinhada à grade das ruas">Grade</button>
+  <label><input id="controle-perspectiva" type="checkbox"> Perspectiva</label>
+  <div class="quebra"></div>
   <label><input id="controle-arvores" type="checkbox" checked> Árvores</label>
+  <label title="Contorno escuro nas copas, na vista de perto"><input id="controle-contornos" type="checkbox" checked> Contornos</label>
   <label><input id="controle-nuvens"  type="checkbox" checked> Nuvens</label>
   <label><input id="controle-nevoa"   type="checkbox" checked> Névoa</label>
   <label><input id="controle-veiculos" type="checkbox" checked> Veículos</label>
-  <label><input id="controle-pixel" type="checkbox"> Pixel art</label>
+  <label><input id="controle-contato" type="checkbox" checked> Sombreamento</label>
+  <label>Pixel art
+    <select id="controle-pixel">
+      <option value="0">desligado</option>
+      <option value="1" selected>ao aproximar</option>
+      <option value="2">sempre</option>
+    </select>
+  </label>
+  <label>Pixel
+    <input id="controle-tam-pixel" type="range" min="1.5" max="4" step="0.5" value="2">
+    <span id="valor-tam-pixel">2</span>
+  </label>
 </div>
 
 <button id="botao-fontes" type="button" hidden>Fontes</button>
@@ -187,7 +213,10 @@ const CAMINHO_DADOS = '../data/processed/cena/';
 // 03 não encontra feições (por exemplo, nenhuma área verde na AOI).
 const CAMADAS_OBRIGATORIAS = ['aoi', 'edificacoes', 'vias'];
 const CAMADAS_OPCIONAIS    = ['agua', 'verde', 'eixos', 'pedestres', 'quadras', 'faixas',
-                             'arvoredo', 'pistas', 'patios', 'rio'];
+                             'arvoredo', 'pistas', 'patios', 'rio',
+                             // versão 1.1.0 (script 03, seções 8.7 e 8.8)
+                             'verde_extra', 'arvores_pontos', 'campo', 'riacho',
+                             'bairros', 'bairros_pontos'];
 
 // 2.2 - Aparência do chão
 // -----------------------------------------------------------------------------
@@ -260,6 +289,18 @@ const ZEBRA_COMPR_M   = 3;        // extensão da faixa ao longo da via
 const ZEBRA_LISTRA_M  = 0.5;      // largura de cada listra
 const ZEBRA_PASSO_M   = 1.0;      // listra + intervalo
 
+// Campo de futebol (campo.geojson): faixas de gramado alternadas no sentido
+// do comprimento e marcação branca nas medidas oficiais (105 x 68 m),
+// reduzidas na proporção do campo quando ele é menor
+const CORES_CAMPO      = ['#5d9b46', '#6caa52'];
+const N_FAIXAS_CAMPO   = 12;
+const LARGURA_LINHA_CAMPO_M = 0.5;   // exagerada (a real tem 12 cm), para aparecer de longe
+const COR_LINHA_CAMPO  = '#f4f3ee';
+
+// Calha do riacho (riacho.geojson): faixa branca sinuosa
+const COR_RIACHO       = '#f2f1ea';
+const LARGURA_RIACHO_M = 2.5;
+
 // Curvas e pontas das vias: leque com este número de triângulos por meia volta
 const SEGMENTOS_CURVA = 6;
 
@@ -292,6 +333,37 @@ const PALETAS = {
     parede:  ['#f4f1ea', '#dfe6ea', '#e9dcc8']
   }
 };
+
+// 2.3.1 - Janelas nas fachadas
+// -----------------------------------------------------------------------------
+
+// Grade de janelas desenhada no shader das paredes (sem geometria nova): uma
+// fileira por pavimento de PISO_M e uma coluna a cada JANELA_PERIODO_M ao
+// longo da parede. Casas e edificações verticais recebem janelas; galpões,
+// não. De longe, quando uma janela ficaria menor que um pixel, o desenho se
+// dissolve na cor da parede (evita o moiré). À noite, uma fração das
+// janelas acende ao acaso. Convenção visual, sem levantamento de fachadas.
+const PISO_M            = 3;
+const JANELA_PERIODO_M  = 3.2;
+const JANELA_LARGURA_M  = 1.4;
+const JANELA_BASE_M     = 1.0;      // peitoril, a partir do piso de cada pavimento
+const JANELA_ALTURA_M   = 1.3;
+const COR_VIDRO         = '#3c4858';
+const COR_JANELA_ACESA  = '#ffd48a';
+const PROPORCAO_ACESAS  = 0.35;
+
+// 2.3.2 - Sombreamento de contato
+// -----------------------------------------------------------------------------
+
+// Aproximação da oclusão ambiente, calculada sem pós-processamento (leve e
+// compatível com o pixel art): a base de cada parede escurece até
+// CONTATO_ALTURA_M de altura, e uma faixa escura de CONTATO_FAIXA_M envolve
+// cada edificação no chão. Becos estreitos entre edificações vizinhas ficam
+// naturalmente mais escuros. Liga e desliga no painel ("Sombreamento").
+const CONTATO_BASE      = 0.68;     // fator de cor no pé da parede
+const CONTATO_ALTURA_M  = 3.5;
+const CONTATO_FAIXA_M   = 2.4;      // largura total da faixa (metade fica sob a edificação)
+const CONTATO_OPACIDADE = 0.2;
 
 // Exagero vertical inicial. As alturas reais de Imperatriz (mediana de 5 m)
 // ficam quase invisíveis numa cena de 15 km; o exagero só escala a malha em Y.
@@ -328,13 +400,25 @@ const ELEVACAO_FACHADA    = 0.35;   // inclinação dessas luzes (0 = horizontal
 // folhosa (copa arredondada, mais larga que alta), coerente com a vegetação da
 // transição Cerrado-Amazônia; os pontos que caem na água ou sobre edificações
 // são descartados (seção 5A.2.1).
-const ARVORES_POR_HECTARE = 25;          // uma árvore a cada 400 m²
+const ARVORES_POR_HECTARE = 32;          // um maciço a cada ~310 m² (versão 1.0: 25)
 const MAX_ARVORES         = 40000;       // teto, para não pesar a cena
 const ALTURA_ARVORE_M     = [6, 12];     // altura total, sorteada por árvore
 const AFASTAMENTO_M       = 3;           // folga mínima entre árvore e edificação
-const CORES_COPA = ['#4f8f3a', '#5c9e41', '#3f7d33', '#6aa84a', '#457f36', '#7aa94e'];
+// versão 1.1.0: mais tons, do verde-escuro ao amarelado (item 10)
+const CORES_COPA = ['#4f8f3a', '#5c9e41', '#3f7d33', '#6aa84a', '#457f36', '#7aa94e',
+                    '#3d7334', '#86ad4c', '#9cb24f', '#5f8a3a', '#4a7d45'];
 const COR_TRONCO = '#7a5a3c';
 const SEMENTE_ARVORES = 42;              // mesma semente = mesmas posições
+// Árvores em posições calculadas pelo script 03 (arvores_pontos.geojson:
+// canteiros, calçadas, praças e casos indicados). As de rua (canteiro e
+// calçada) são menores. O teto evita pesar a cena em placas modestas.
+const ALTURA_ARVORE_RUA_M  = [5, 9];
+// Árvores indicadas pelo autor (script 03, seção 2.13): altura e diâmetro da
+// copa vêm do arquivo (altura_m, copa_m). RAIO_ARRANJO_COPA é a meia largura
+// de uma copa em couve-flor, em unidades do arranjo (anel de bolotas a cerca
+// de 0,56 do centro, com raio de cerca de 0,48; seção 2.6.4.1).
+const RAIO_ARRANJO_COPA    = 1.04;
+const MAX_ARVORES_PONTUAIS = 60000;
 
 // 2.6.3 - Árvores na orla das lagoas
 // -----------------------------------------------------------------------------
@@ -355,6 +439,26 @@ const FREQ_TREMOR       = 4.2;    // radianos por segundo (mais rápido que o ba
 const OPACIDADE_SOMBRA  = 0.28;   // sombras ao meio-dia; somem à noite
 const COR_COPA_TOPO     = '#ffffff';   // multiplicada pela cor sorteada da árvore
 const COR_COPA_BASE     = '#7f97a0';   // lado de baixo, verde-azulado após a multiplicação
+
+// 2.6.4.1 - Acabamento das copas (versão 1.1.0, item 10)
+// -----------------------------------------------------------------------------
+
+// Aproximação do acabamento ilustrado do Slop Toronto, sem IA: copas em
+// "couve-flor" (oito bolotas de tamanhos variados); nas manchas de arvoredo do
+// Dynamic World, maciços de três copas encostadas, que formam dossel;
+// sombreamento em três faixas de tom (toon) em vez de gradiente; contorno
+// escuro nas copas (casca invertida, desenhada só pelo lado de dentro); e
+// variação de brilho entre árvores. Para não pesar a cena, as árvores são
+// divididas em blocos de TAMANHO_BLOCO_ARVORES_M (os fora da tela não são
+// desenhados) e, de longe (um pixel cobrindo mais que LOD_ARVORES_MPP
+// metros), cada árvore vira uma única bolota, sem tronco nem contorno.
+const GRADIENTE_TOON          = [0.45, 0.74, 1.0];   // tons de sombra, meia-luz e luz
+const COR_CONTORNO_COPA       = '#1f3324';
+const CONTORNO_COPA           = 0.1;     // casca 10% maior que cada bolota
+const VARIACAO_BRILHO_COPA    = 0.07;    // ± na luminosidade de cada árvore
+const TAMANHO_BLOCO_ARVORES_M = 2000;
+const LOD_ARVORES_MPP         = 1.0;
+const ESCALA_MACICO           = 1.3;     // maciços mais largos, para fechar o dossel
 
 const AREA_MIN_LAGOA_HA   = 0.3;
 const AREA_MAX_LAGOA_HA   = 100;
@@ -386,6 +490,22 @@ const AMPLITUDE_VENTO_M  = 0.6;    // deslocamento máximo no topo, em metros
 const ALTURA_REF_VENTO_M = 14;     // altura em que o deslocamento chega ao máximo
 const FREQ_VENTO         = 1.4;    // radianos por segundo (uma oscilação a cada ~4,5 s)
 const DIRECAO_VENTO_GRAUS = 40;    // de onde para onde o vento empurra (0 = leste, 90 = norte)
+
+// 2.6.5 - Iluminação noturna das vias
+// -----------------------------------------------------------------------------
+
+// À noite, o leito das vias brilha numa luz quente, mais forte nas arteriais,
+// e pontos de luz (postes) aparecem dos dois lados das vias principais. A
+// intensidade acompanha o relógio: zero de dia, máxima à noite. Convenção
+// visual: não corresponde à rede real de iluminação pública.
+const COR_LUZ_VIA = '#ffb860';
+const LUZ_VIAS = {                  // intensidade relativa por classe
+  trunk: 1, primary: 1, secondary: 0.7, tertiary: 0.7,
+  residential: 0.35, unclassified: 0.35, living_street: 0.3
+};
+const ESPACO_POSTES_M = 30;
+const COR_POSTE       = '#fff3c8';
+const CLASSES_POSTES  = ['trunk', 'primary', 'secondary', 'tertiary'];
 
 // 2.7 - Nuvens e névoa
 // -----------------------------------------------------------------------------
@@ -435,10 +555,15 @@ const SEMENTE_VEICULOS = 11;
 // passam a NIVEIS_COR tons por canal, com pontilhado regular (matriz de Bayer
 // 4 x 4) nas transições, e os objetos ganham contorno escuro onde a
 // profundidade salta mais que SALTO_CONTORNO_M (borda de prédio, copa, veículo).
-const FATOR_PIXEL      = 3;
+const FATOR_PIXEL      = 2;     // inicial; o controle "Pixel" do painel vai de 1,5 a 4
 const NIVEIS_COR       = 7;
 const SALTO_CONTORNO_M = 3;
 const ZOOM_MAXIMO      = 800;   // cerca de 35 pixels por metro numa tela de 1080 linhas
+// Modo "ao aproximar" (inspirado no Slop Toronto): o pixel art começa a
+// aparecer quando um pixel da tela cobre menos que o primeiro valor (metros)
+// e fica completo abaixo do segundo; de longe, a cena aparece sem o filtro
+const PIXEL_MPP_INICIO = 0.5;
+const PIXEL_MPP_COMPLETO = 0.3;
 
 // 2.8.3 - Brasões nas fachadas
 // -----------------------------------------------------------------------------
@@ -457,6 +582,19 @@ const BRASOES = [
     parede: 'rua', largura_rel: 0.5, altura_rel: 0.6 }
 ];
 
+// 2.8.4 - Câmera
+// -----------------------------------------------------------------------------
+
+// Vista inicial alinhada à grade das ruas: a orientação dominante dos eixos
+// (média ponderada pelo comprimento, em ângulos módulo 90°) gira a vista
+// isométrica para que as ruas corram nas diagonais da tela, como no Slop
+// Toronto. O botão "Norte" põe o norte para cima; o botão "Grade" volta à
+// vista alinhada. A perspectiva é opcional (controle no painel).
+const CLASSES_GRADE      = ['residential', 'unclassified', 'tertiary', 'secondary', 'primary'];
+const FOV_PERSPECTIVA    = 35;      // graus, na vertical
+const DURACAO_GIRO_S     = 0.8;
+const POLAR_MAX_PERSP    = 82;      // graus; a perspectiva permite vistas mais rasantes
+
 // 2.8.1 - Avião
 // -----------------------------------------------------------------------------
 
@@ -472,6 +610,12 @@ const AVIAO_SUBIDA_GRAUS     = 8;
 const AVIAO_DIST_APROX_M     = 6000;  // início da aproximação, antes do toque
 const AVIAO_PAUSA_S          = 8;     // parado na cabeceira antes de decolar
 const AVIAO_INTERVALO_S      = 20;    // fora de vista entre dois ciclos
+// Sombra do avião (inspirada no tinyrj de Thomas M.): só o avião projeta
+// sombra, e a câmera de sombra do Sol acompanha o avião numa caixa estreita
+// ao longo dos raios de luz, de modo que a sombra cai nítida sobre o chão e
+// sobe pelas paredes e telhados das edificações.
+const SOMBRA_AVIAO_LADO_M    = 80;    // meia largura da caixa de sombra
+const SOMBRA_AVIAO_MAPA_PX   = 1024;
 
 
 // -----------------------------------------------------------------------------
@@ -610,6 +754,34 @@ function areaAnel(anel) {
   return Math.abs(s) / 2;
 }
 
+// 3.7 - Orientação da grade das ruas (seção 2.8.4)
+// -----------------------------------------------------------------------------
+
+// Ângulo dominante dos eixos, em radianos, entre -45° e 45°. Ruas
+// perpendiculares contam como a mesma direção: cada ângulo é multiplicado
+// por 4 (período de 90°) antes da média circular, ponderada pelo comprimento.
+function anguloGrade(eixos) {
+  let c = 0, s = 0;
+  for (const f of eixos?.features ?? []) {
+    if (!CLASSES_GRADE.includes(f.properties?.classe)) continue;
+    for (const linha of linhasDe(f)) {
+      for (let i = 0; i < linha.length - 1; i++) {
+        const dx = linha[i + 1][0] - linha[i][0], dy = linha[i + 1][1] - linha[i][1];
+        const w = Math.hypot(dx, dy);
+        const a = 4 * Math.atan2(dy, dx);
+        c += w * Math.cos(a); s += w * Math.sin(a);
+      }
+    }
+  }
+  return (c === 0 && s === 0) ? 0 : Math.atan2(s, c) / 4;
+}
+
+// Azimute da câmera (convenção do three.js: ângulo a partir do sul, girando
+// para leste) que mostra a grade nas diagonais da tela: o canto sudeste da
+// vista isométrica clássica (45°) girado pelo ângulo da grade
+function azimuteIso(anguloGradeRad) {
+  return Math.PI / 4 + anguloGradeRad;
+}
 
 // -----------------------------------------------------------------------------
 // 4. - Chão: textura desenhada em canvas
@@ -811,6 +983,19 @@ function acumularZebra(ac, x, y, angulo, largura) {
   }
 }
 
+// 4A.7.1 - Normal constante (para cima) num BufferGeometry sem normais. O
+// sombreamento facetado calcula a normal no próprio shader e não a usa, mas o
+// cálculo da sombra do three.js lê o atributo normal; sem ele, a coordenada
+// da sombra vira um valor inválido e nenhuma sombra aparece (seção 2.8.1).
+// Um byte por componente basta.
+function normalParaCima(geo) {
+  const n = geo.attributes.position.count;
+  const normais = new Int8Array(n * 3);
+  for (let i = 1; i < normais.length; i += 3) normais[i] = 127;
+  geo.setAttribute('normal', new THREE.BufferAttribute(normais, 3, true));
+  return geo;
+}
+
 // 4A.8 - Malha de uma cor a partir de um acumulador, na posição "ordem" da
 // pilha do piso. flatShading calcula a normal no próprio shader (todas
 // apontam para cima); DoubleSide dispensa conferir a orientação dos triângulos.
@@ -820,6 +1005,7 @@ function malhaPiso(ac, cor, ordem) {
   geo.setAttribute('position', new THREE.Float32BufferAttribute(ac.pos, 3));
   geo.setIndex(new THREE.BufferAttribute(new Uint32Array(ac.idx), 1));
   geo.computeBoundingSphere();
+  normalParaCima(geo);
   const mat = new THREE.MeshStandardMaterial({
     color: cor, roughness: 1, metalness: 0, flatShading: true,
     side: THREE.DoubleSide, depthWrite: false
@@ -847,7 +1033,21 @@ function construirPiso(dados) {
   ac = novoAcumulador();     acumularPoligonos(ac, dados.verde);
   empilhar(ac, dados.arvoredo ? COR_GRAMA : COR_VERDE);
   ac = novoAcumulador();     acumularPoligonos(ac, dados.arvoredo); empilhar(ac, COR_ARVOREDO);
+  // canteiros e quadras indicadas (versão 1.1.0): gramado
+  ac = novoAcumulador();     acumularPoligonos(ac, dados.verde_extra); empilhar(ac, COR_GRAMA);
   ac = novoAcumulador();     acumularPoligonos(ac, dados.agua);    empilhar(ac, COR_AGUA);
+  // calha do riacho
+  ac = novoAcumulador();
+  for (const f of dados.riacho?.features ?? []) {
+    for (const linha of linhasDe(f)) acumularFaixa(ac, linha, LARGURA_RIACHO_M);
+  }
+  empilhar(ac, COR_RIACHO);
+  // campo de futebol: faixas de gramado e marcação (seção 4A.9.1)
+  for (const f of dados.campo?.features ?? []) {
+    const campo = desenharCampo(f);
+    campo.faixas.forEach((a, k) => empilhar(a, CORES_CAMPO[k]));
+    empilhar(campo.linhas, COR_LINHA_CAMPO);
+  }
 
   // aeroporto: pátios, pistas e taxiways, e a linha central da pista de pouso
   ac = novoAcumulador();
@@ -907,6 +1107,108 @@ function construirPiso(dados) {
   return { grupo, triangulos };
 }
 
+// 4A.9.1 - Campo de futebol a partir do retângulo do script 03 (seção 8.7.6):
+// u = ao longo do comprimento, v = ao longo da largura, origem no centro.
+// Medidas oficiais multiplicadas por k = menor das razões comprimento/105 e
+// largura/68.
+function desenharCampo(f) {
+  const { comprimento: L, largura: W, angulo } = f.properties;
+  const anel = poligonosDe(f)[0][0];
+  const cx = (anel[0][0] + anel[1][0] + anel[2][0] + anel[3][0]) / 4;
+  const cy = (anel[0][1] + anel[1][1] + anel[2][1] + anel[3][1]) / 4;
+  const ux = Math.cos(angulo), uy = Math.sin(angulo);
+  const p = (u, v) => [cx + ux * u - uy * v, cy + uy * u + ux * v];
+  const k = Math.min(L / 105, W / 68);
+  // faixas de gramado alternadas, em dois acumuladores (duas cores)
+  const faixas = [novoAcumulador(), novoAcumulador()];
+  const passo = L / N_FAIXAS_CAMPO;
+  for (let i = 0; i < N_FAIXAS_CAMPO; i++) {
+    const u0 = -L / 2 + i * passo;
+    acumularRetangulo(faixas[i % 2], ...p(u0, 0), ...p(u0 + passo, 0), W);
+  }
+  // marcação: contorno, linha do meio, círculo central, grandes áreas,
+  // pequenas áreas e marcas do pênalti
+  const linhas = novoAcumulador(), w = LARGURA_LINHA_CAMPO_M;
+  const ret = (u0, v0, u1, v1) => acumularFaixa(linhas, [p(u0, v0), p(u1, v0), p(u1, v1), p(u0, v1), p(u0, v0)], w);
+  ret(-L / 2, -W / 2, L / 2, W / 2);
+  acumularFaixa(linhas, [p(0, -W / 2), p(0, W / 2)], w);
+  const circ = [];
+  for (let i = 0; i <= 40; i++) { const t = i / 40 * 2 * Math.PI; circ.push(p(9.15 * k * Math.cos(t), 9.15 * k * Math.sin(t))); }
+  acumularFaixa(linhas, circ, w);
+  acumularDisco(linhas, ...p(0, 0), 0.6);
+  for (const lado of [-1, 1]) {
+    const fundo = lado * L / 2;
+    ret(fundo, -20.15 * k, fundo - lado * 16.5 * k, 20.15 * k);
+    ret(fundo, -9.15 * k, fundo - lado * 5.5 * k, 9.15 * k);
+    acumularDisco(linhas, ...p(fundo - lado * 11 * k, 0), 0.6);
+  }
+  return { faixas, linhas };
+}
+
+// 4A.10 - Luzes da noite (seção 2.6.5): o leito das vias recebe uma faixa de
+// luz quente, somada à cor do piso (mistura aditiva), com uma malha por nível
+// de intensidade; os postes são discos claros dos dois lados das vias
+// principais. A opacidade das malhas segue o relógio (seção 7.2).
+function construirLuzesNoturnas(eixos) {
+  const grupo = new THREE.Group();
+  const materiais = [];
+  if (!eixos) return { grupo, ajustar: () => {} };
+  const niveis = [...new Set(Object.values(LUZ_VIAS))];
+  for (const nivel of niveis) {
+    const ac = novoAcumulador();
+    for (const f of eixos.features) {
+      if (LUZ_VIAS[f.properties.classe] !== nivel) continue;
+      for (const linha of linhasDe(f)) acumularFaixa(ac, linha, f.properties.largura + 2);
+    }
+    if (ac.nv === 0) continue;
+    const m = malhaPiso(ac, COR_LUZ_VIA, -55);
+    m.material = new THREE.MeshBasicMaterial({ color: COR_LUZ_VIA, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    m.userData.nivel = nivel * 0.4;
+    materiais.push(m);
+    grupo.add(m);
+  }
+  // postes: um disco de 0,8 m a cada ESPACO_POSTES_M, na borda do leito
+  const ac = novoAcumulador();
+  for (const f of eixos.features) {
+    if (!CLASSES_POSTES.includes(f.properties.classe)) continue;
+    const afast = f.properties.largura / 2 + 0.8;
+    for (const linha of linhasDe(f)) {
+      let resto = ESPACO_POSTES_M / 2;
+      for (let i = 0; i < linha.length - 1; i++) {
+        const [x0, y0] = linha[i], [x1, y1] = linha[i + 1];
+        const comp = Math.hypot(x1 - x0, y1 - y0);
+        if (comp < 1e-6) continue;
+        const ux = (x1 - x0) / comp, uy = (y1 - y0) / comp;
+        let d = resto;
+        for (; d < comp; d += ESPACO_POSTES_M) {
+          const x = x0 + ux * d, y = y0 + uy * d;
+          acumularDisco(ac, x - uy * afast, y + ux * afast, 0.8);
+          acumularDisco(ac, x + uy * afast, y - ux * afast, 0.8);
+        }
+        resto = d - comp;
+      }
+    }
+  }
+  if (ac.nv > 0) {
+    const m = malhaPiso(ac, COR_POSTE, -54);
+    m.material = new THREE.MeshBasicMaterial({ color: COR_POSTE, transparent: true, opacity: 0,
+      depthWrite: false, side: THREE.DoubleSide });
+    m.userData.nivel = 1;
+    materiais.push(m);
+    grupo.add(m);
+  }
+  // noite: 0 (dia) a 1 (noite); malhas apagadas ficam invisíveis
+  function ajustar(noite) {
+    for (const m of materiais) {
+      m.material.opacity = m.userData.nivel * noite;
+      m.visible = noite > 0.01;
+    }
+  }
+  ajustar(0);
+  return { grupo, ajustar };
+}
+
 
 // -----------------------------------------------------------------------------
 // 5. - Edificações: uma única malha com todas as extrusões
@@ -944,12 +1246,15 @@ function construirEdificacoes(geojson) {
   // 5.2 - Vetores tipados do tamanho exato
   const posicoes = new Float32Array(totalVertices * 3);
   const cores    = new Uint8Array(totalVertices * 3);
+  const tipos    = new Uint8Array(totalVertices);     // 0 casa, 1 galpão, 2 vertical (janelas)
   const indices  = new Uint32Array(maxIndices);
   let v = 0;    // próximo vértice livre
   let k = 0;    // próximo índice livre
 
   // grava um vértice (x, y no mapa; h = altura) com sua cor
+  let tipoAtual = 0;
   function vertice(x, y, h, c) {
+    tipos[v] = tipoAtual;
     // eixos da cena: X = leste, Y = altura, Z = sul (norte em -Z)
     posicoes[v * 3]     = x;
     posicoes[v * 3 + 1] = h;
@@ -967,6 +1272,7 @@ function construirEdificacoes(geojson) {
     const cTelh   = sortear(paleta.telhado, p.id, 0);
     const cParede = sortear(paleta.parede,  p.id, 7);
     const h       = p.h_cena;
+    tipoAtual     = p.tipo === 'galpao' ? 1 : (p.tipo === 'vertical' ? 2 : 0);
 
     // anéis de vértices: base e topo da parede, e telhado
     const base = v;
@@ -995,15 +1301,17 @@ function construirEdificacoes(geojson) {
   const geometria = new THREE.BufferGeometry();
   geometria.setAttribute('position', new THREE.BufferAttribute(posicoes, 3));
   geometria.setAttribute('color',    new THREE.BufferAttribute(cores, 3, true));
+  geometria.setAttribute('aTipo',    new THREE.BufferAttribute(tipos, 1));
+  normalParaCima(geometria);   // só para o cálculo da sombra (seção 4A.7.1)
   geometria.setIndex(new THREE.BufferAttribute(indices.subarray(0, k), 1));
   geometria.computeBoundingSphere();
 
   // DoubleSide: os contornos chegam com orientação variada (horário ou
   // anti-horário); desenhar os dois lados evita paredes invisíveis
-  const material = new THREE.MeshStandardMaterial({
+  const material = fachadas(new THREE.MeshStandardMaterial({
     vertexColors: true, flatShading: true, roughness: 0.92, metalness: 0,
     side: THREE.DoubleSide
-  });
+  }));
 
   // 5.5 - Índice espacial para a identificação por clique (seção 6.10): cada
   // edificação entra nas células de 50 m que o seu retângulo envolvente toca
@@ -1059,7 +1367,96 @@ function construirEdificacoes(geojson) {
     return melhor;
   }
 
-  return { malha: new THREE.Mesh(geometria, material), n: itens.length, edificacaoEm, edificacaoProxima, hMax };
+  return { malha: new THREE.Mesh(geometria, material), n: itens.length, edificacaoEm, edificacaoProxima, hMax,
+           contato: faixaContato(itens) };
+}
+
+// 5.6 - Janelas e base escurecida, acrescentadas ao shader padrão (seções
+// 2.3.1 e 2.3.2). A posição de cada fragmento em metros reais (antes do
+// exagero vertical) chega pela variável vPosObj; a normal do plano (sombreamento
+// facetado) separa paredes de telhados. As janelas seguem a parede: a
+// coordenada horizontal é a projeção da posição na direção da parede.
+const uNoite   = { value: 0 };   // 0 de dia, 1 à noite (relógio, seção 7.2)
+const uContato = { value: 1 };   // sombreamento de contato ligado ou não
+function fachadas(material) {
+  material.customProgramCacheKey = () => 'fachadas';
+  material.onBeforeCompile = shader => {
+    shader.uniforms.uNoite = uNoite;
+    shader.uniforms.uContato = uContato;
+    shader.vertexShader = 'attribute float aTipo;\nvarying float vTipo;\nvarying vec3 vPosObj;\n' +
+      shader.vertexShader.replace('#include <begin_vertex>',
+        '#include <begin_vertex>\n  vTipo = aTipo;\n  vPosObj = position;');
+    const vidro = new THREE.Color(COR_VIDRO), acesa = new THREE.Color(COR_JANELA_ACESA);
+    const f = v => v.toFixed(4);
+    shader.fragmentShader = 'uniform float uNoite, uContato;\nvarying float vTipo;\nvarying vec3 vPosObj;\n' +
+      'float hashJanela(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }\n' +
+      shader.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+      {
+        // normal no espaço do mundo (a matriz de vista é ortonormal)
+        vec3 nW = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
+        float parede = 1.0 - step(0.5, abs(nW.y));
+        // base escurecida: contato com o chão
+        float ao = mix(${f(CONTATO_BASE)}, 1.0, smoothstep(0.0, ${f(CONTATO_ALTURA_M)}, vPosObj.y));
+        diffuseColor.rgb *= mix(1.0, ao, parede * uContato);
+        // janelas: só em paredes de casas (0) e edificações verticais (2)
+        if (parede > 0.5 && vTipo != 1.0) {
+          vec2 t = normalize(vec2(-nW.z, nW.x));
+          float s = dot(vPosObj.xz, t);
+          float y = vPosObj.y;
+          float fx = fract(s / ${f(JANELA_PERIODO_M)});
+          float fy = fract(y / ${f(PISO_M)});
+          float meia = ${f(JANELA_LARGURA_M / JANELA_PERIODO_M / 2)};
+          float jan = step(0.5 - meia, fx) * step(fx, 0.5 + meia)
+                    * step(${f(JANELA_BASE_M / PISO_M)}, fy) * step(fy, ${f((JANELA_BASE_M + JANELA_ALTURA_M) / PISO_M)})
+                    * step(0.6, y);
+          // dissolve o desenho quando um metro ocupa menos de ~2 pixels
+          float mpp = max(fwidth(s), fwidth(y));
+          jan *= 1.0 - smoothstep(0.35, 0.8, mpp);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(${f(vidro.r)}, ${f(vidro.g)}, ${f(vidro.b)}), 0.65 * jan);
+          float acende = step(hashJanela(vec3(floor(s / ${f(JANELA_PERIODO_M)}), floor(y / ${f(PISO_M)}),
+                                              floor(vPosObj.x * 0.05) + floor(vPosObj.z * 0.05) * 31.0)),
+                              ${f(PROPORCAO_ACESAS)});
+          totalEmissiveRadiance += vec3(${f(acesa.r)}, ${f(acesa.g)}, ${f(acesa.b)}) * jan * acende * uNoite * 0.9;
+        }
+      }`);
+  };
+  return material;
+}
+
+// 5.7 - Faixa de contato no chão: um retângulo escuro e translúcido ao longo
+// de cada aresta do contorno, com metade da largura sob a própria edificação
+// (escondida por ela) e metade para fora. Uma única malha para a cena toda.
+function faixaContato(itens) {
+  let nArestas = 0;
+  for (const it of itens) nArestas += it.anel.length;
+  const pos = new Float32Array(nArestas * 4 * 3);
+  const idx = new Uint32Array(nArestas * 6);
+  let v = 0, k = 0;
+  const w = CONTATO_FAIXA_M / 2;
+  for (const { anel } of itens) {
+    const n = anel.length;
+    for (let i = 0; i < n; i++) {
+      const [x0, y0] = anel[i], [x1, y1] = anel[(i + 1) % n];
+      const comp = Math.hypot(x1 - x0, y1 - y0);
+      if (comp < 0.5) continue;
+      const nx = -(y1 - y0) / comp * w, ny = (x1 - x0) / comp * w;
+      // estende cada retângulo meia largura nas pontas, para fechar os cantos
+      const ux = (x1 - x0) / comp * w, uy = (y1 - y0) / comp * w;
+      const pts = [[x0 - ux + nx, y0 - uy + ny], [x0 - ux - nx, y0 - uy - ny],
+                   [x1 + ux - nx, y1 + uy - ny], [x1 + ux + nx, y1 + uy + ny]];
+      for (const [x, y] of pts) { pos[v * 3] = x; pos[v * 3 + 1] = 0; pos[v * 3 + 2] = -y; v++; }
+      idx[k++] = v - 4; idx[k++] = v - 3; idx[k++] = v - 2;
+      idx[k++] = v - 4; idx[k++] = v - 2; idx[k++] = v - 1;
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, v * 3), 3));
+  geo.setIndex(new THREE.BufferAttribute(idx.subarray(0, k), 1));
+  geo.computeBoundingSphere();
+  const malha = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    color: '#1d2420', transparent: true, opacity: CONTATO_OPACIDADE, depthWrite: false, side: THREE.DoubleSide }));
+  malha.renderOrder = -60;   // acima do piso, abaixo das edificações (seção 4A)
+  return malha;
 }
 
 
@@ -1079,15 +1476,48 @@ let materialSombra = null;
 // 5A.0.1 - Copa em cacho: bolotas facetadas [x, y, z, raio] num espaço de
 // raio ~1, com degradê de cor (claro no alto, escuro embaixo) e a fase de
 // tremor de cada bolota (atributo aFase)
-const ARRANJOS_COPA = [
-  [[0, 0.2, 0, 0.72], [0.5, -0.1, 0.15, 0.55], [-0.45, -0.05, -0.2, 0.58], [0.05, -0.15, -0.5, 0.5], [-0.15, -0.1, 0.5, 0.5]],
-  [[0, 0.15, 0, 0.8], [0.55, -0.15, -0.1, 0.5], [-0.5, -0.1, 0.25, 0.55], [0.1, 0, 0.55, 0.45]],
-  [[0.2, 0.1, 0.1, 0.65], [-0.3, 0.15, -0.15, 0.62], [0.35, -0.15, -0.4, 0.48], [-0.25, -0.2, 0.45, 0.5], [0, 0.45, 0, 0.45]]
-];
-function geometriaCacho(lobos) {
+
+// Copa em "couve-flor" (item 10): uma bolota no alto, um anel de cinco e duas
+// mais baixas, com tamanhos e posições sorteados (semente fixa)
+function arranjoCouveFlor(semente) {
+  const r = sorteador(semente);
+  const lobos = [[0, 0.32, 0, 0.5 + 0.08 * r()]];
+  for (let k = 0; k < 5; k++) {
+    const a = (k + 0.5 * r()) / 5 * Math.PI * 2, d = 0.5 + 0.12 * r();
+    lobos.push([d * Math.cos(a), 0.02 + 0.1 * r(), d * Math.sin(a), 0.42 + 0.12 * r()]);
+  }
+  for (let k = 0; k < 2; k++) {
+    const a = r() * Math.PI * 2;
+    lobos.push([0.45 * Math.cos(a), -0.28, 0.45 * Math.sin(a), 0.38 + 0.08 * r()]);
+  }
+  return lobos;
+}
+// Maciço (item 10): três copas menores encostadas, em alturas diferentes,
+// ocupando cerca do dobro da largura de uma copa; usado no arvoredo do
+// Dynamic World, onde as copas se fundem num dossel
+function arranjoMacico(semente) {
+  const r = sorteador(semente);
+  const lobos = [];
+  const centros = [[0, 0], [0.95, 0.45], [-0.7, 0.85]];
+  for (const [cx0, cz0] of centros) {
+    const cx = cx0 + 0.15 * (r() - 0.5), cz = cz0 + 0.15 * (r() - 0.5);
+    const s = 0.7 + 0.3 * r(), dy = 0.2 * (r() - 0.5);
+    lobos.push([cx, dy + 0.3 * s, cz, 0.5 * s]);
+    for (let k = 0; k < 3; k++) {
+      const a = (k + 0.5 * r()) / 3 * Math.PI * 2;
+      lobos.push([cx + 0.45 * s * Math.cos(a), dy, cz + 0.45 * s * Math.sin(a), 0.42 * s]);
+    }
+  }
+  // recentra o maciço na origem
+  const mx = lobos.reduce((t, l) => t + l[0], 0) / lobos.length;
+  const mz = lobos.reduce((t, l) => t + l[2], 0) / lobos.length;
+  return lobos.map(([x, y, z, rr]) => [x - mx, y, z - mz, rr]);
+}
+// inflar > 0: casca do contorno, com cada bolota maior que a da copa
+function geometriaCacho(lobos, inflar = 0) {
   const topo = new THREE.Color(COR_COPA_TOPO), base = new THREE.Color(COR_COPA_BASE), c = new THREE.Color();
   return mergeGeometries(lobos.map(([x, y, z, r], i) => {
-    const g = new THREE.IcosahedronGeometry(r, 0).translate(x, y, z);
+    const g = new THREE.IcosahedronGeometry(r * (1 + inflar) + (inflar > 0 ? 0.02 : 0), 0).translate(x, y, z);
     const pos = g.attributes.position;
     const cores = new Float32Array(pos.count * 3), fases = new Float32Array(pos.count);
     for (let v = 0; v < pos.count; v++) {
@@ -1142,9 +1572,9 @@ function balancar(material, tremor = false) {
 
 // Uma InstancedMesh desenha milhares de cópias da mesma forma numa única
 // chamada à placa de vídeo; cada cópia tem sua própria posição, escala e cor.
-function plantarArvores(verde, agua, edificacoes, eixos = null) {
+function plantarArvores(verde, agua, edificacoes, eixos = null, extras = null) {
   const grupo = new THREE.Group();
-  if (!verde && !agua) return { grupo, n: 0, nPalmeiras: 0 };
+  if (!verde && !agua && !extras) return { grupo, n: 0, nPalmeiras: 0 };
   const sortear01 = sorteador(SEMENTE_ARVORES);
 
   // 5A.1 - Polígonos verdes, com área e retângulo envolvente
@@ -1176,6 +1606,35 @@ function plantarArvores(verde, agua, edificacoes, eixos = null) {
     }
   }
 
+  // 5A.1.2 - Árvores pontuais do script 03 (seção 2.6): posições já
+  // filtradas lá; as de rua (canteiro e calçada) ganham altura menor. Acima
+  // do teto, fica uma a cada tantas, de modo uniforme.
+  let extrasXY = [];
+  for (const f of extras?.features ?? []) {
+    if (f.geometry?.type !== 'Point') continue;
+    const [x, y] = f.geometry.coordinates;
+    // [x, y, de rua, maciço, altura fixa, copa fixa]: as duas últimas só nas
+    // árvores indicadas pelo autor
+    extrasXY.push([x, y, ['canteiro', 'calcada'].includes(f.properties?.origem), false,
+                   f.properties?.altura_m ?? null, f.properties?.copa_m ?? null]);
+  }
+  // acima do teto, só as árvores de calçada são rareadas (uma a cada
+  // tantas); canteiros, praças e casos indicados ficam todos
+  if (extrasXY.length > MAX_ARVORES_PONTUAIS) {
+    const calcada = [], outras = [];
+    for (const f of extras.features) {
+      if (f.geometry?.type !== 'Point') continue;
+      const [x, y] = f.geometry.coordinates;
+      const o = f.properties?.origem;
+      (o === 'calcada' ? calcada : outras).push([x, y, o === 'canteiro' || o === 'calcada', false,
+                                                 f.properties?.altura_m ?? null, f.properties?.copa_m ?? null]);
+    }
+    const vagas = Math.max(0, MAX_ARVORES_PONTUAIS - outras.length);
+    const passo = calcada.length / Math.max(vagas, 1);
+    console.warn(`Árvores pontuais: ${extrasXY.length} acima do teto; calçadas rareadas de ${calcada.length} para ${Math.min(vagas, calcada.length)}.`);
+    extrasXY = outras.concat(Array.from({ length: Math.min(vagas, calcada.length) }, (_, i) => calcada[Math.floor(i * passo)]));
+  }
+
   // 5A.2 - Quantidade: densidade por hectare, reduzida se passar do teto
   let densidade = ARVORES_POR_HECTARE;
   if (areaTotal / 10000 * densidade > MAX_ARVORES) densidade = MAX_ARVORES / (areaTotal / 10000);
@@ -1197,7 +1656,9 @@ function plantarArvores(verde, agua, edificacoes, eixos = null) {
       vy0 = Math.min(vy0, y - folgaOrla); vy1 = Math.max(vy1, y + folgaOrla);
     }
   }
-  if (!Number.isFinite(vx0)) return { grupo, n: 0, nPalmeiras: 0 };
+  // sem áreas verdes nem lagoas, a máscara fica com 1 pixel e só as árvores
+  // pontuais são plantadas
+  if (!Number.isFinite(vx0)) { vx0 = vy0 = 0; vx1 = vy1 = 1; }
   // resolução: 2 m por pixel, limitada a 4096 pixels no lado maior
   const escM = Math.min(0.5, 4096 / Math.max(vx1 - vx0, vy1 - vy0, 1));
   const mascara = document.createElement('canvas');
@@ -1262,7 +1723,8 @@ function plantarArvores(verde, agua, edificacoes, eixos = null) {
       if (livre(x, y) && pontoDentro(x, y, a.aneis)) {
         // nas áreas grandes, cada ponto vira palmeira com a probabilidade definida
         const palmeira = a.grande && sortear01() < PROPORCAO_PALMEIRAS;
-        (palmeira ? pontosPalmeira : pontos).push([x, y]);
+        // [x, y, de rua, maciço]: os pontos das manchas viram maciços (item 10)
+        (palmeira ? pontosPalmeira : pontos).push([x, y, false, true]);
         aceitos++;
       }
     }
@@ -1293,29 +1755,36 @@ function plantarArvores(verde, agua, edificacoes, eixos = null) {
     }
   }
 
+  pontos.push(...extrasXY);
   const n = pontos.length;
   const nPalmeiras = pontosPalmeira.length;
   if (n + nPalmeiras === 0) return { grupo, n: 0, nPalmeiras: 0 };
 
-  // 5A.4 - Formas-base: icosaedro facetado (copa arredondada de folhosa,
-  // centrada na origem, raio 1) e cilindro fino (tronco, base em y = 0,
-  // altura 1), ambos escalados por árvore
+  // 5A.4 - Formas-base (item 10): copas em couve-flor (árvores isoladas) e
+  // maciços (arvoredo), cada uma com a sua casca de contorno; bolota única
+  // para a vista de longe; cilindro fino para o tronco (base em y = 0,
+  // altura 1). Todas escaladas por árvore.
+  const arranjosIsolados = [1, 2, 3].map(arranjoCouveFlor);
+  const arranjosMacico   = [11, 12].map(arranjoMacico);
+  const arranjos = [...arranjosIsolados, ...arranjosMacico];
+  const geoCopa  = arranjos.map(l => geometriaCacho(l));
+  const geoCasca = arranjos.map(l => geometriaCacho(l, CONTORNO_COPA));
+  const geoLonge = geometriaCacho([[0, 0, 0, 1]]);
   const geoTronco = new THREE.CylinderGeometry(0.12, 0.16, 1, 5).translate(0, 0.5, 0);
-  const matCopa   = balancar(new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }), true);
+
+  // sombreamento em faixas (toon): três tons fixos de luz, sem gradiente
+  const tons = new Uint8Array(GRADIENTE_TOON.map(v => Math.round(v * 255)));
+  const gradiente = new THREE.DataTexture(tons, tons.length, 1, THREE.RedFormat);
+  gradiente.minFilter = gradiente.magFilter = THREE.NearestFilter;
+  gradiente.generateMipmaps = false;
+  gradiente.needsUpdate = true;
+  const matCopa   = balancar(new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: gradiente }), true);
+  const matCasca  = balancar(new THREE.MeshBasicMaterial({ color: COR_CONTORNO_COPA, side: THREE.BackSide }), true);
   const matTronco = balancar(new THREE.MeshStandardMaterial({ color: COR_TRONCO, roughness: 1 }));
-  // um arranjo de copa sorteado por árvore; uma malha instanciada por arranjo.
-  // InstancedMesh com zero cópias não é permitido; o mínimo é 1 e a contagem
-  // real fica em .count
-  const arranjo = pontos.map(() => Math.floor(sortear01() * ARRANJOS_COPA.length));
-  const copasPorArranjo = ARRANJOS_COPA.map((lobos, a) => {
-    const total = arranjo.filter(v => v === a).length;
-    const malha = new THREE.InstancedMesh(geometriaCacho(lobos), matCopa, Math.max(total, 1));
-    malha.count = total;
-    return malha;
-  });
-  const cursor = ARRANJOS_COPA.map(() => 0);
-  const troncos = new THREE.InstancedMesh(geoTronco, matTronco, Math.max(n, 1));
-  troncos.count = n;
+  // as cascas e as copas usam chaves de cache próprias (a função balancar
+  // dá a mesma chave a todos os materiais com tremor)
+  matCopa.customProgramCacheKey  = () => 'balanco_tremor_toon';
+  matCasca.customProgramCacheKey = () => 'balanco_tremor_casca';
 
   // sombras: uma elipse por árvore e por palmeira; o shader as desloca para o
   // lado oposto ao Sol, proporcionalmente à altura (guardada na escala Y)
@@ -1338,43 +1807,93 @@ function plantarArvores(verde, agua, edificacoes, eixos = null) {
   sombras.count = n + nPalmeiras;
   sombras.frustumCulled = false;
 
-  // 5A.5 - Matriz e cor de cada árvore (h = altura total): copa com raio
-  // horizontal de 40% de h e vertical de 30% de h, centrada a 70% de h; tronco
-  // até 50% de h, escondido na base da copa. O resultado é uma copa larga e
-  // achatada, mais larga que alta.
+  // 5A.5 - Sorteio das medidas de cada árvore (h = altura total), guardado em
+  // vetores para a montagem por bloco: copa com raio horizontal de 40% de h e
+  // vertical de 30% de h, centrada a 70% de h; tronco até 50% de h, escondido
+  // na base da copa. O resultado é uma copa larga e achatada.
+  const H = new Float32Array(n), GIRO = new Float32Array(n), RX = new Float32Array(n), RZ = new Float32Array(n);
+  const ARR = new Uint8Array(n), BLOCO = new Array(n);
+  const COR = new Array(n);
+  const T = TAMANHO_BLOCO_ARVORES_M;
+  pontos.forEach(([x, y, rua, macico, hFixa, copaFixa], i) => {
+    const [hmin, hmax] = rua ? ALTURA_ARVORE_RUA_M : ALTURA_ARVORE_M;
+    H[i] = hmin + sortear01() * (hmax - hmin);
+    GIRO[i] = sortear01() * Math.PI * 2;
+    const largo = macico ? ESCALA_MACICO : 1;
+    RX[i] = H[i] * 0.40 * largo * (0.85 + sortear01() * 0.3);
+    RZ[i] = H[i] * 0.40 * largo * (0.85 + sortear01() * 0.3);
+    ARR[i] = macico
+      ? arranjosIsolados.length + Math.floor(sortear01() * arranjosMacico.length)
+      : Math.floor(sortear01() * arranjosIsolados.length);
+    COR[i] = new THREE.Color(CORES_COPA[Math.floor(sortear01() * CORES_COPA.length)])
+      .offsetHSL(0, 0, VARIACAO_BRILHO_COPA * (2 * sortear01() - 1));
+    // árvore indicada: medidas do arquivo; os sorteios acima são feitos mesmo
+    // assim, para não alterar as demais árvores da sequência
+    if (hFixa > 0) {
+      H[i] = hFixa;
+      RX[i] = RZ[i] = copaFixa > 0 ? copaFixa / (2 * RAIO_ARRANJO_COPA) : hFixa * 0.40;
+    }
+    BLOCO[i] = Math.floor(x / T) + ',' + Math.floor(y / T);
+  });
+
+  // 5A.5.0 - Montagem por bloco: em cada bloco, uma malha instanciada por
+  // arranjo (copa e casca), uma de troncos e uma de bolotas da vista de longe.
+  // Cada malha tem a sua esfera envolvente, de modo que o three.js deixa de
+  // desenhar os blocos fora da tela.
+  const grupoPerto = new THREE.Group(), grupoLonge = new THREE.Group(), grupoCasca = new THREE.Group();
+  grupoPerto.add(grupoCasca);
+  const porBloco = new Map();
+  for (let i = 0; i < n; i++) {
+    if (!porBloco.has(BLOCO[i])) porBloco.set(BLOCO[i], []);
+    porBloco.get(BLOCO[i]).push(i);
+  }
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const pos = new THREE.Vector3();
   const esc = new THREE.Vector3();
   const cor = new THREE.Color();
-  const [hmin, hmax] = ALTURA_ARVORE_M;
-  pontos.forEach(([x, y], i) => {
-    const h = hmin + sortear01() * (hmax - hmin);
-    const giro = sortear01() * Math.PI * 2;
-    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), giro);
-
-    m.compose(pos.set(x, 0, -y), q, esc.set(h * 0.6, h * 0.5, h * 0.6));
-    troncos.setMatrixAt(i, m);
-
-    // copa levemente irregular: cada eixo horizontal varia em até 15%
-    const rx = h * 0.40 * (0.85 + sortear01() * 0.3);
-    const rz = h * 0.40 * (0.85 + sortear01() * 0.3);
-    m.compose(pos.set(x, h * 0.70, -y), q, esc.set(rx, h * 0.30, rz));
-    const copas = copasPorArranjo[arranjo[i]];
-    const k = cursor[arranjo[i]]++;
-    copas.setMatrixAt(k, m);
-    copas.setColorAt(k, cor.set(CORES_COPA[Math.floor(sortear01() * CORES_COPA.length)]));
-
-    // sombra: elipse do tamanho da copa, com a altura da árvore na escala Y
-    m.compose(pos.set(x, 0.05, -y), q, esc.set(rx * 1.05, h, rz * 1.05));
-    sombras.setMatrixAt(i, m);
-  });
-  for (const copas of copasPorArranjo) {
-    copas.instanceMatrix.needsUpdate = true;
-    if (copas.instanceColor) copas.instanceColor.needsUpdate = true;
+  const eixoY = new THREE.Vector3(0, 1, 0);
+  const instanciada = (geo, mat, total) => { const im = new THREE.InstancedMesh(geo, mat, Math.max(total, 1)); im.count = total; return im; };
+  for (const indices of porBloco.values()) {
+    const contagem = arranjos.map(() => 0);
+    for (const i of indices) contagem[ARR[i]]++;
+    const copas  = contagem.map((c, a) => c ? instanciada(geoCopa[a], matCopa, c) : null);
+    const cascas = contagem.map((c, a) => c ? instanciada(geoCasca[a], matCasca, c) : null);
+    const troncos = instanciada(geoTronco, matTronco, indices.length);
+    const longe   = instanciada(geoLonge, matCopa, indices.length);
+    const cursor = arranjos.map(() => 0);
+    indices.forEach((i, k) => {
+      const [x, y] = pontos[i];
+      const h = H[i];
+      q.setFromAxisAngle(eixoY, GIRO[i]);
+      m.compose(pos.set(x, 0, -y), q, esc.set(h * 0.6, h * 0.5, h * 0.6));
+      troncos.setMatrixAt(k, m);
+      m.compose(pos.set(x, h * 0.70, -y), q, esc.set(RX[i], h * 0.30, RZ[i]));
+      const a = ARR[i], j = cursor[a]++;
+      copas[a].setMatrixAt(j, m);
+      copas[a].setColorAt(j, COR[i]);
+      cascas[a].setMatrixAt(j, m);
+      // de longe: uma bolota; o maciço fica mais largo que a copa isolada
+      const largura = a >= arranjosIsolados.length ? 1.45 : 1;
+      m.compose(pos.set(x, h * 0.70, -y), q, esc.set(RX[i] * largura, h * 0.32, RZ[i] * largura));
+      longe.setMatrixAt(k, m);
+      longe.setColorAt(k, COR[i]);
+      // sombra: elipse do tamanho da copa (ou do maciço), com a altura na escala Y
+      m.compose(pos.set(x, 0.05, -y), q, esc.set(RX[i] * 1.05 * largura, h, RZ[i] * 1.05 * largura));
+      sombras.setMatrixAt(i, m);
+    });
+    for (const im of [...copas, ...cascas, troncos, longe]) {
+      if (!im) continue;
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+      im.computeBoundingSphere();
+    }
+    grupoPerto.add(...copas.filter(Boolean), troncos);
+    grupoCasca.add(...cascas.filter(Boolean));
+    grupoLonge.add(longe);
   }
-  troncos.instanceMatrix.needsUpdate = true;
-  grupo.add(...copasPorArranjo, troncos, sombras);
+  grupoLonge.visible = false;
+  grupo.add(grupoPerto, grupoLonge, sombras);
 
   // 5A.5.1 - Palmeiras: coroa de folhas arqueadas sobre estipe fino
   if (nPalmeiras > 0) {
@@ -1428,7 +1947,17 @@ function plantarArvores(verde, agua, edificacoes, eixos = null) {
   }
   sombras.instanceMatrix.needsUpdate = true;
 
-  return { grupo, n, nPalmeiras };
+  // 5A.6 - Nível de detalhe: de perto, copas completas, troncos e contornos;
+  // de longe, uma bolota por árvore (seção 2.6.4.1). Chamado a cada quadro.
+  let contornos = true;
+  function ajustarDetalhe(metrosPorPixel) {
+    const perto = metrosPorPixel < LOD_ARVORES_MPP;
+    grupoPerto.visible = perto;
+    grupoLonge.visible = !perto;
+    grupoCasca.visible = contornos;
+  }
+  function mostrarContornos(v) { contornos = v; grupoCasca.visible = v; }
+  return { grupo, n, nPalmeiras, ajustarDetalhe, mostrarContornos };
 }
 
 
@@ -1836,8 +2365,9 @@ function criarVeiculos(dados) {
                                                 VELOCIDADE_BARCO_MS, sortear01, ESCALA_VEICULOS);
   }
 
+  const aviao = criarAviao(dados.pistas, ESCALA_VEICULOS);
   for (const frota of [
-    criarAviao(dados.pistas, ESCALA_VEICULOS),
+    aviao,
     barcosLivres,
     criarFrota(redeCarros,    N_CARROS,    FORMAS_VEICULO.carro,    CORES_CARROS, VELOCIDADE_CARRO_MS,    sortear01, { escala: ESCALA_VEICULOS }),
     criarFrota(redeCaminhoes, N_CAMINHOES, FORMAS_VEICULO.caminhao, CORES_CARGAS, VELOCIDADE_CAMINHAO_MS, sortear01, { escala: ESCALA_VEICULOS }),
@@ -1847,6 +2377,7 @@ function criarVeiculos(dados) {
   }
   return {
     grupo,
+    aviao,
     contagem: frotas.map(f => f.n),
     mover: dt => { for (const f of frotas) f.mover(dt * ESCALA_TEMPO); }
   };
@@ -1862,9 +2393,10 @@ function criarVeiculos(dados) {
 // sem suavização, converte para sRGB, reduz as cores com pontilhado de Bayer e
 // escurece as bordas onde a profundidade salta. A câmera é ortográfica, então a
 // profundidade gravada já é linear entre near e far.
-function criarPixelArt(renderer, camera) {
-  const tamanho = () => [Math.max(1, Math.floor(window.innerWidth / FATOR_PIXEL)),
-                         Math.max(1, Math.floor(window.innerHeight / FATOR_PIXEL))];
+function criarPixelArt(renderer, vista) {
+  let fator = FATOR_PIXEL;
+  const tamanho = () => [Math.max(1, Math.floor(window.innerWidth / fator)),
+                         Math.max(1, Math.floor(window.innerHeight / fator))];
   const [w, h] = tamanho();
   const alvo = new THREE.WebGLRenderTarget(w, h, {
     minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
@@ -1877,8 +2409,10 @@ function criarPixelArt(renderer, camera) {
       tCor:   { value: alvo.texture },
       tProf:  { value: alvo.depthTexture },
       uRes:   { value: new THREE.Vector2(w, h) },
-      uNear:  { value: camera.near },
-      uFar:   { value: camera.far },
+      uNear:  { value: 1 },
+      uFar:   { value: 1000 },
+      uPersp: { value: 0 },
+      uAlfa:  { value: 1 },
       uSalto: { value: SALTO_CONTORNO_M },
       uNiveis:{ value: NIVEIS_COR }
     },
@@ -1887,9 +2421,15 @@ function criarPixelArt(renderer, camera) {
       void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
     fragmentShader: `
       uniform sampler2D tCor; uniform sampler2D tProf;
-      uniform vec2 uRes; uniform float uNear, uFar, uSalto, uNiveis;
+      uniform vec2 uRes; uniform float uNear, uFar, uSalto, uNiveis, uPersp, uAlfa;
       varying vec2 vUv;
-      float prof(vec2 uv) { return mix(uNear, uFar, texture2D(tProf, uv).x); }
+      // profundidade em metros: linear na câmera ortográfica; na perspectiva,
+      // o valor gravado é convertido de volta para a distância
+      float prof(vec2 uv) {
+        float z = texture2D(tProf, uv).x;
+        if (uPersp > 0.5) return 2.0 * uNear * uFar / (uFar + uNear - (2.0 * z - 1.0) * (uFar - uNear));
+        return mix(uNear, uFar, z);
+      }
       float bayer(vec2 p) {
         int x = int(mod(p.x, 4.0)), y = int(mod(p.y, 4.0));
         float m[16] = float[16](0., 8., 2., 10., 12., 4., 14., 6., 3., 11., 1., 9., 15., 7., 13., 5.);
@@ -1906,29 +2446,41 @@ function criarPixelArt(renderer, camera) {
         vec2 e = 1.0 / uRes;
         float salto = max(max(prof(uv + vec2(e.x, 0.0)), prof(uv - vec2(e.x, 0.0))),
                           max(prof(uv + vec2(0.0, e.y)), prof(uv - vec2(0.0, e.y)))) - d;
-        if (salto > uSalto) c *= 0.45;
+        // na perspectiva, o limiar cresce com a distância (2% dela): de longe,
+        // um pixel de chão já cobre vários metros de profundidade
+        if (salto > uSalto + uPersp * d * 0.02) c *= 0.45;
         // paleta reduzida com pontilhado regular
         float n = uNiveis - 1.0;
         c = floor(c * n + 0.5 + bayer(px) * 0.9) / n;
-        gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+        gl_FragColor = vec4(clamp(c, 0.0, 1.0), uAlfa);
       }`,
-    depthTest: false, depthWrite: false
+    depthTest: false, depthWrite: false, transparent: true
   });
   const quadCena = new THREE.Scene();
   quadCena.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
   const quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
   return {
-    ativo: false,
-    desenhar(cena) {
-      material.uniforms.uNear.value = camera.near;
-      material.uniforms.uFar.value = camera.far;
+    // alfa = 1: só o pixel art; entre 0 e 1: a cena normal já desenhada na
+    // tela recebe o pixel art por cima, com essa opacidade (transição do
+    // modo "ao aproximar")
+    desenhar(cena, alfa = 1) {
+      const camera = vista.camera;
+      const u = material.uniforms;
+      u.uNear.value = camera.near;
+      u.uFar.value = camera.far;
+      u.uPersp.value = camera.isPerspectiveCamera ? 1 : 0;
+      u.uAlfa.value = alfa;
       renderer.setRenderTarget(alvo);
       renderer.render(cena, camera);
       renderer.setRenderTarget(null);
+      const limpar = renderer.autoClear;
+      renderer.autoClear = alfa >= 1;
       renderer.render(quadCena, quadCamera);
+      renderer.autoClear = limpar;
     },
-    redimensionar() {
+    redimensionar(novoFator = fator) {
+      fator = novoFator;
       const [w2, h2] = tamanho();
       alvo.setSize(w2, h2);
       material.uniforms.uRes.value.set(w2, h2);
@@ -1968,7 +2520,50 @@ function utmParaGeo(E, N, fuso, sul) {
 // de altura, do topo da edificação mais alta até o chão; a primeira
 // edificação cujo contorno contém o ponto e cuja altura (com o exagero
 // vertical) o alcança é a que se vê no clique. Mostra a caixa e um marcador.
-function criarIdentificacao(cena, camera, renderer, edificacoes, edificacaoEm, hMax, metadados) {
+// 5E.1.1 - Bairro e via mais próxima de um ponto (versão 1.1.0), a partir dos
+// nomes do OSM: bairro = polígono que contém o ponto; sem polígonos, o ponto
+// de bairro mais próximo (até 3 km, marcado como aproximado); via = eixo com
+// nome mais próximo (até 80 m)
+function criarLocalizador(dados) {
+  const vias = [];
+  for (const f of dados.eixos?.features ?? []) {
+    const nome = f.properties?.nome;
+    if (!nome) continue;
+    for (const linha of linhasDe(f)) vias.push({ nome, linha });
+  }
+  const bairros = (dados.bairros?.features ?? []).filter(f => f.properties?.nome);
+  const pontosBairro = (dados.bairros_pontos?.features ?? []).filter(f => f.properties?.nome && f.geometry?.type === 'Point');
+  function viaProxima(x, y) {
+    let melhor = null, dMin = 80;
+    for (const { nome, linha } of vias) {
+      for (let i = 0; i < linha.length - 1; i++) {
+        const [x0, y0] = linha[i], [x1, y1] = linha[i + 1];
+        if (Math.min(x0, x1) - dMin > x || Math.max(x0, x1) + dMin < x ||
+            Math.min(y0, y1) - dMin > y || Math.max(y0, y1) + dMin < y) continue;
+        const dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy || 1;
+        const t = Math.max(0, Math.min(1, ((x - x0) * dx + (y - y0) * dy) / l2));
+        const d = Math.hypot(x - x0 - t * dx, y - y0 - t * dy);
+        if (d < dMin) { dMin = d; melhor = nome; }
+      }
+    }
+    return melhor;
+  }
+  function bairro(x, y) {
+    for (const f of bairros) {
+      for (const aneis of poligonosDe(f)) if (pontoDentro(x, y, aneis)) return f.properties.nome;
+    }
+    let melhor = null, dMin = 3000;
+    for (const f of pontosBairro) {
+      const [px, py] = f.geometry.coordinates;
+      const d = Math.hypot(px - x, py - y);
+      if (d < dMin) { dMin = d; melhor = f.properties.nome; }
+    }
+    return melhor ? melhor + ' (aprox.)' : null;
+  }
+  return { viaProxima, bairro };
+}
+
+function criarIdentificacao(cena, vista, renderer, edificacoes, edificacaoEm, hMax, metadados, localizador) {
   const caixa = document.getElementById('identificacao');
   const raio = new THREE.Raycaster(), ndc = new THREE.Vector2();
   const origem = metadados?.origem_utm ?? null;
@@ -1986,7 +2581,7 @@ function criarIdentificacao(cena, camera, renderer, edificacoes, edificacaoEm, h
 
   return function (evento) {
     ndc.set(evento.clientX / window.innerWidth * 2 - 1, -(evento.clientY / window.innerHeight) * 2 + 1);
-    raio.setFromCamera(ndc, camera);
+    raio.setFromCamera(ndc, vista.camera);
     const o = raio.ray.origin, d = raio.ray.direction;
     if (d.y >= 0) return;
     const exag = edificacoes.scale.y;
@@ -2013,8 +2608,13 @@ function criarIdentificacao(cena, camera, renderer, edificacoes, edificacaoEm, h
               ` · <a href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${ll}" target="_blank" rel="noopener">Street View</a>`;
       window.ultimaEdificacao = { id: p.id, tipo: p.tipo, pav: p.pav, h_cena: p.h_cena, lat, lon, utm_e: E, utm_n: N };
     }
+    // bairro e via (nomes do OSM), quando houver
+    const nomeBairro = localizador?.bairro(cx, cy);
+    const nomeVia = localizador?.viaProxima(cx, cy);
+    const linhaLugar = (nomeBairro ? `Bairro: ${nomeBairro}<br>` : '') +
+                       (nomeVia ? `Via mais próxima: ${nomeVia}<br>` : '');
     caixa.innerHTML = `<span class="fechar" title="Fechar (Esc)">✕</span>` +
-      `<b>Edificação ${p.id}</b><br>` +
+      `<b>Edificação ${p.id}</b><br>` + linhaLugar +
       `Classe: ${p.tipo} · ${p.pav} pavimento(s)${p.imputado ? ' (altura imputada)' : ''}<br>` +
       `Altura na cena: ${p.h_cena} m, sem o exagero vertical<br>${linhaGeo}${links}`;
     caixa.hidden = false;
@@ -2158,10 +2758,18 @@ async function principal() {
   const meia = extensao * 0.62;
   const camera = new THREE.OrthographicCamera(
     -meia * aspecto(), meia * aspecto(), meia, -meia, 1, extensao * 20);
-  // posição isométrica clássica: 45° de azimute, cerca de 35° de elevação
+  // posição isométrica clássica: cerca de 35° de elevação, com o azimute
+  // girado pela orientação da grade das ruas (seção 2.8.4)
   const alvo = new THREE.Vector3(cx, 0, -cy);
-  camera.position.set(cx + extensao * 2, extensao * 2, -cy + extensao * 2);
+  const giroGrade = anguloGrade(dados.eixos);
+  const azGrade = azimuteIso(giroGrade);
+  const distOrto = extensao * 2 * Math.sqrt(3);                    // mesma distância da versão 1.0
+  const polarIso = Math.acos(1 / Math.sqrt(3));                    // elevação isométrica (~35,3°)
+  camera.position.setFromSphericalCoords(distOrto, polarIso, azGrade).add(alvo);
   camera.lookAt(alvo);
+  // câmera em perspectiva, usada quando o controle "Perspectiva" é marcado
+  const cameraPersp = new THREE.PerspectiveCamera(FOV_PERSPECTIVA, aspecto(), 1, extensao * 8);
+  const vista = { camera };   // câmera ativa, lida pelas funções da cena
 
   // 6.5 - Controles: girar, arrastar e aproximar, com limites de inclinação
   const controles = new OrbitControls(camera, renderer.domElement);
@@ -2174,7 +2782,55 @@ async function principal() {
   // zoom máximo profundo (seção 2.8.2): de perto se leem as marcações, as
   // faixas de pedestre, os veículos e as copas
   controles.maxZoom = ZOOM_MAXIMO;
+  controles.minDistance = 25;                 // usados só na perspectiva
+  controles.maxDistance = extensao * 3;
   controles.update();
+
+  // 6.5.1 - Troca entre ortográfica e perspectiva, mantendo o enquadramento:
+  // a altura visível no alvo (2 x meia / zoom) define a distância da câmera
+  // em perspectiva, e vice-versa
+  const tanFov = Math.tan(THREE.MathUtils.degToRad(FOV_PERSPECTIVA / 2));
+  function trocarCamera(perspectiva) {
+    const atual = vista.camera;
+    const dir = atual.position.clone().sub(controles.target).normalize();
+    if (perspectiva && !atual.isPerspectiveCamera) {
+      const d = (meia / camera.zoom) / tanFov;
+      cameraPersp.position.copy(controles.target).addScaledVector(dir, d);
+      cameraPersp.aspect = aspecto();
+      cameraPersp.updateProjectionMatrix();
+      vista.camera = cameraPersp;
+      controles.maxPolarAngle = THREE.MathUtils.degToRad(POLAR_MAX_PERSP);
+    } else if (!perspectiva && atual.isPerspectiveCamera) {
+      const d = cameraPersp.position.distanceTo(controles.target);
+      camera.zoom = THREE.MathUtils.clamp(meia / (d * tanFov), controles.minZoom, controles.maxZoom);
+      camera.position.copy(controles.target).addScaledVector(dir, distOrto);
+      camera.updateProjectionMatrix();
+      vista.camera = camera;
+      controles.maxPolarAngle = THREE.MathUtils.degToRad(75);
+    }
+    controles.object = vista.camera;
+    vista.camera.lookAt(controles.target);
+    controles.update();
+  }
+
+  // 6.5.2 - Giro animado da vista até um azimute (botões Norte e Grade),
+  // mantendo a inclinação e a distância; o laço de desenho avança o giro
+  let giro = null;
+  function girarPara(azimute) {
+    const esf = new THREE.Spherical().setFromVector3(vista.camera.position.clone().sub(controles.target));
+    let delta = azimute - esf.theta;
+    delta = Math.atan2(Math.sin(delta), Math.cos(delta));    // pelo caminho mais curto
+    giro = { de: esf.theta, delta, t: 0 };
+  }
+  function avancarGiro(dt) {
+    if (!giro) return;
+    giro.t = Math.min(1, giro.t + dt / DURACAO_GIRO_S);
+    const esf = new THREE.Spherical().setFromVector3(vista.camera.position.clone().sub(controles.target));
+    esf.theta = giro.de + giro.delta * THREE.MathUtils.smootherstep(giro.t, 0, 1);
+    vista.camera.position.setFromSpherical(esf).add(controles.target);
+    vista.camera.lookAt(controles.target);
+    if (giro.t >= 1) giro = null;
+  }
 
   // 6.6 - Luzes: hemisférica (céu e chão) e direcional (Sol, movida pelo relógio)
   const luzCeu = new THREE.HemisphereLight(0xdfefff, 0x8a7a60, 1.0);
@@ -2198,6 +2854,8 @@ async function principal() {
   const pisoVetorial = Boolean(dados.eixos && dados.eixos.features.length > 0);
   let triangulosPiso = 0;
   let chao;
+  let pisoGrupo = null;
+  let luzesNoite = { grupo: new THREE.Group(), ajustar: () => {} };
   if (pisoVetorial) {
     chao = new THREE.Mesh(
       new THREE.PlaneGeometry(largura, profund).rotateX(-Math.PI / 2),
@@ -2208,6 +2866,9 @@ async function principal() {
     const piso = construirPiso(dados);
     cena.add(piso.grupo);
     triangulosPiso = piso.triangulos;
+    pisoGrupo = piso.grupo;
+    luzesNoite = construirLuzesNoturnas(dados.eixos);
+    cena.add(luzesNoite.grupo);
   } else {
     await avisar('Desenhando o chão (vias, água, áreas verdes)…');
     const texturaChao = desenharChao(dados, lim);
@@ -2232,19 +2893,50 @@ async function principal() {
 
   // 6.8 - Edificações
   await avisar(`Montando ${dados.edificacoes.features.length.toLocaleString('pt-BR')} edificações…`);
-  const { malha: edificacoes, n, edificacaoEm, edificacaoProxima, hMax } = construirEdificacoes(dados.edificacoes);
+  const { malha: edificacoes, n, edificacaoEm, edificacaoProxima, hMax, contato } = construirEdificacoes(dados.edificacoes);
   edificacoes.scale.y = EXAGERO_INICIAL;
-  cena.add(edificacoes);
+  cena.add(edificacoes, contato);
 
   // 6.8.1 - Árvores nas áreas verdes
   await avisar('Plantando árvores nas áreas verdes…');
-  const { grupo: arvores, n: nArvores, nPalmeiras } =
-    plantarArvores(dados.arvoredo ?? dados.verde, dados.agua, dados.edificacoes, pisoVetorial ? dados.eixos : null);
+  const { grupo: arvores, n: nArvores, nPalmeiras, ajustarDetalhe: detalheArvores, mostrarContornos } =
+    plantarArvores(dados.arvoredo ?? dados.verde, dados.agua, dados.edificacoes, pisoVetorial ? dados.eixos : null,
+                   dados.arvores_pontos);
   cena.add(arvores);
 
   // 6.8.1.1 - Veículos (só com o piso vetorial, que traz a rede de eixos)
   const veiculos = pisoVetorial ? criarVeiculos(dados) : { grupo: new THREE.Group(), contagem: [], mover: () => {} };
   cena.add(veiculos.grupo);
+
+  // 6.8.1.2 - Sombra do avião (seção 2.8.1): só o avião projeta; chão, piso e
+  // edificações recebem. A caixa da sombra acompanha o avião no laço (8.2).
+  const aviao = veiculos.aviao?.malha ?? null;
+  const dirSol = new THREE.Vector3(0, 1, 0);   // atualizada pelo relógio (7.2)
+  if (aviao) {
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    sol.castShadow = true;
+    sol.shadow.mapSize.set(SOMBRA_AVIAO_MAPA_PX, SOMBRA_AVIAO_MAPA_PX);
+    sol.shadow.bias = -0.0005;
+    const sc = sol.shadow.camera;
+    sc.left = sc.bottom = -SOMBRA_AVIAO_LADO_M;
+    sc.right = sc.top = SOMBRA_AVIAO_LADO_M;
+    sc.near = 1;
+    sc.updateProjectionMatrix();
+    aviao.castShadow = true;
+    edificacoes.receiveShadow = true;
+    chao.receiveShadow = true;
+    pisoGrupo?.traverse(o => { if (o.isMesh) o.receiveShadow = true; });
+  }
+  // o Sol fica a DIST_SOL do avião, na direção da luz; a caixa vai até o chão
+  const DIST_SOL = 600;
+  function seguirAviao() {
+    if (!aviao) return;
+    sol.target.position.copy(aviao.position);
+    sol.position.copy(aviao.position).addScaledVector(dirSol, DIST_SOL);
+    sol.shadow.camera.far = DIST_SOL + aviao.position.y / Math.max(dirSol.y, 0.05) + 400;
+    sol.shadow.camera.updateProjectionMatrix();
+  }
 
   // 6.8.2 - Nuvens sobre as bordas
   const nuvens = criarNuvens(lim, extensao);
@@ -2270,7 +2962,7 @@ async function principal() {
       + (ressalvas.length
           ? '<div class="ressalvas"><b>Ressalvas</b>' + ressalvas.map(t => `<div>${t}</div>`).join('') + '</div>'
           : '')
-      + '<div class="assistencia">Desenvolvido com assistência Anthropic - Claude LLM Opus 5.5</div>';
+      + '<div class="assistencia">Versão 1.1.0 · Desenvolvido com assistência Anthropic - Claude LLM Opus 5.5</div>';
     // a lista começa fechada; o botão "Fontes" abre e fecha
     const elBotaoFontes = document.getElementById('botao-fontes');
     elBotaoFontes.hidden = false;
@@ -2304,6 +2996,11 @@ async function principal() {
 
     const dir = new THREE.Vector3(Math.cos(theta), Math.max(elev, 0.04), DESVIO_SOL_SUL).normalize();
     sol.position.copy(alvo).addScaledVector(dir, raio);
+    dirSol.copy(dir);
+    seguirAviao();
+    // noite: janelas acesas (5.6) e vias iluminadas (4A.10)
+    uNoite.value = 1 - dia;
+    luzesNoite.ajustar(1 - dia);
     sol.intensity = 2.6 * dia;
     sol.color.copy(luzQuente).lerp(luzBranca, dia);
     luzCeu.intensity = 0.35 + 0.85 * dia;
@@ -2344,9 +3041,17 @@ async function principal() {
     document.getElementById('valor-exagero').textContent = `${elExagero.value}×`;
   });
   document.getElementById('controle-arvores').addEventListener('change', e => { arvores.visible = e.target.checked; });
+  document.getElementById('controle-contornos').addEventListener('change', e => mostrarContornos?.(e.target.checked));
   document.getElementById('controle-nuvens').addEventListener('change',  e => { nuvens.grupo.visible = e.target.checked; });
   document.getElementById('controle-nevoa').addEventListener('change',   e => { cena.fog = e.target.checked ? nevoa : null; });
   document.getElementById('controle-veiculos').addEventListener('change', e => { veiculos.grupo.visible = e.target.checked; });
+  document.getElementById('controle-contato').addEventListener('change', e => {
+    contato.visible = e.target.checked;
+    uContato.value = e.target.checked ? 1 : 0;
+  });
+  document.getElementById('controle-perspectiva').addEventListener('change', e => trocarCamera(e.target.checked));
+  document.getElementById('botao-norte').addEventListener('click', () => girarPara(0));
+  document.getElementById('botao-grade').addEventListener('click', () => girarPara(azGrade));
   elPlay.addEventListener('click', () => {
     tocando = !tocando;
     elPlay.textContent = tocando ? '❚❚ Pausar' : '▶ Reproduzir dia';
@@ -2359,15 +3064,38 @@ async function principal() {
   // 8. - Laço de desenho
   // ---------------------------------------------------------------------------
 
-  // 7.4 - Pixel art: liga e desliga no painel (seção 2.8.2 e função 5D)
-  const pixelArt = criarPixelArt(renderer, camera);
-  document.getElementById('controle-pixel').addEventListener('change', e => { pixelArt.ativo = e.target.checked; });
+  // 7.4 - Pixel art (seção 2.8.2 e função 5D): desligado, ao aproximar ou
+  // sempre; o tamanho do pixel vem do controle "Pixel"
+  const pixelArt = criarPixelArt(renderer, vista);
+  const elModoPixel = document.getElementById('controle-pixel');
+  let modoPixel = parseInt(elModoPixel.value, 10);
+  elModoPixel.addEventListener('change', () => { modoPixel = parseInt(elModoPixel.value, 10); });
+  const elTamPixel = document.getElementById('controle-tam-pixel');
+  elTamPixel.addEventListener('input', () => {
+    pixelArt.redimensionar(parseFloat(elTamPixel.value));
+    document.getElementById('valor-tam-pixel').textContent = elTamPixel.value;
+  });
+  // metros por pixel da tela no alvo da câmera
+  function metrosPorPixel() {
+    const c = vista.camera;
+    const alturaVisivel = c.isPerspectiveCamera
+      ? 2 * c.position.distanceTo(controles.target) * tanFov
+      : (c.top - c.bottom) / c.zoom;
+    return alturaVisivel / window.innerHeight;
+  }
+  function alfaPixel() {
+    if (modoPixel === 0) return 0;
+    if (modoPixel === 2) return 1;
+    return THREE.MathUtils.clamp((PIXEL_MPP_INICIO - metrosPorPixel()) /
+                                 (PIXEL_MPP_INICIO - PIXEL_MPP_COMPLETO), 0, 1);
+  }
 
   // 7.6 - Brasões nas fachadas (seção 2.8.3)
   const brasoes = criarBrasoes(cena, renderer, edificacaoProxima, metadados, pisoVetorial ? dados.eixos : null);
 
   // 7.5 - Identificação por duplo clique (seção 6.10)
-  const identificar = criarIdentificacao(cena, camera, renderer, edificacoes, edificacaoEm, hMax, metadados);
+  const identificar = criarIdentificacao(cena, vista, renderer, edificacoes, edificacaoEm, hMax, metadados,
+                                        criarLocalizador(dados));
   renderer.domElement.addEventListener('dblclick', identificar);
 
   // 8.1 - Ajuste ao redimensionar a janela
@@ -2375,6 +3103,8 @@ async function principal() {
     camera.left = -meia * aspecto();
     camera.right = meia * aspecto();
     camera.updateProjectionMatrix();
+    cameraPersp.aspect = aspecto();
+    cameraPersp.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
     pixelArt.redimensionar();
   });
@@ -2394,9 +3124,23 @@ async function principal() {
       aplicarHora(hora);
     }
     nuvens.mover(dt);
+    avancarGiro(dt);
     controles.update();
-    if (pixelArt.ativo) pixelArt.desenhar(cena);
-    else renderer.render(cena, camera);
+    seguirAviao();
+    // névoa e planos de recorte acompanham a distância da câmera ao alvo
+    // (na perspectiva, o zoom aproxima a câmera)
+    const dist = vista.camera.position.distanceTo(controles.target);
+    nevoa.near = dist + NEVOA_INICIO * extensao;
+    nevoa.far  = dist + NEVOA_FIM * extensao;
+    if (vista.camera.isPerspectiveCamera) {
+      cameraPersp.near = Math.max(0.5, dist * 0.004);
+      cameraPersp.far  = dist + extensao * 3;
+      cameraPersp.updateProjectionMatrix();
+    }
+    detalheArvores?.(metrosPorPixel());   // copas completas de perto, bolotas de longe
+    const alfa = alfaPixel();
+    if (alfa < 1) renderer.render(cena, vista.camera);
+    if (alfa > 0) pixelArt.desenhar(cena, alfa);
   });
 
   elStatus.hidden = true;
@@ -2409,8 +3153,10 @@ async function principal() {
   });
   // expõe um resumo para conferência no console do navegador (F12)
   window.cenaInfo = { edificacoes: n, arvores: nArvores, palmeiras: nPalmeiras, extensao_m: Math.round(extensao), piso: pisoVetorial ? 'vetorial' : 'textura', triangulos_piso: triangulosPiso,
-                     veiculos: veiculos.contagem };
-  window.cenaControle = { camera, controles, veiculos: veiculos.grupo, brasoes: brasoes.placas };   // acesso à câmera pelo console, para conferências
+                     veiculos: veiculos.contagem, grade_graus: +THREE.MathUtils.radToDeg(giroGrade).toFixed(1) };
+  // acesso à câmera pelo console, para conferências (camera = câmera ativa)
+  window.cenaControle = { get camera() { return vista.camera; }, controles, cena, renderer, veiculos: veiculos.grupo, brasoes: brasoes.placas,
+                          aviao, trocarCamera, girarPara, ajustarHora: h => { hora = h; elHora.value = h; aplicarHora(h); } };
 }
 
 // Executa e mostra qualquer falha na tela, em vez de deixar a página em branco

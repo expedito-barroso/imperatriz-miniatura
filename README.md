@@ -8,7 +8,7 @@ Maquete digital isométrica, no estilo *tiny city*, do núcleo urbano de Imperat
 
 *An isometric "tiny city" model of Imperatriz (Maranhão, Brazil), built from Google Open Buildings 2.5D heights, OpenStreetMap and Dynamic World, processed in R and rendered with three.js. Text in Portuguese.*
 
-Versão 1.0.0 · novembro de 2026
+Versão 1.1.0 · novembro de 2026
 
 ---
 
@@ -16,9 +16,10 @@ Versão 1.0.0 · novembro de 2026
 
 - **Edificações:** contornos do Google Open Buildings V3 e alturas do Open Buildings 2.5D Temporal (2023), discretizadas em pavimentos; três classes visuais (casa, galpão, vertical) definidas por altura e área.
 - **Piso vetorial:** eixos das vias de carro com largura por classe, calçadas e quadras derivadas, marcações, faixas de pedestre, caminhos, ferrovia e aeroporto, a partir do OpenStreetMap.
-- **Vegetação:** árvores onde a classificação Dynamic World (2023) indica arvoredo com pelo menos 0,25 ha; gramados nas demais manchas verdes.
-- **Animações ilustrativas:** relógio do dia (luz, céu e sombras das árvores), balanço das copas, carros, caminhões na BR-010, barcos no Tocantins e um avião na pista.
-- **Interação:** girar, arrastar e aproximar; duplo clique numa edificação mostra classe, pavimentos, coordenadas e links para o Google Maps e o Street View; filtro opcional de pixel art; tecla H esconde a interface para gravação de vídeo.
+- **Vegetação:** árvores onde a classificação Dynamic World (2023) indica arvoredo com pelo menos 0,25 ha; gramados nas demais manchas verdes. Desde a 1.1.0, copas com acabamento ilustrado (sombreamento em três tons, contorno escuro e maciços encostados no arvoredo), e também canteiros gramados, árvores em canteiros e nas calçadas das avenidas com pelo menos 4 m livres, árvores nas praças do OSM e lugares indicados pelo autor (um estádio com campo marcado e a faixa de um riacho).
+- **Edificações (1.1.0):** janelas nas fachadas, acesas ao acaso à noite, e sombreamento de contato na base das paredes e no chão em volta.
+- **Animações ilustrativas:** relógio do dia (luz, céu, sombras das árvores e, à noite, vias iluminadas), balanço das copas, carros, caminhões na BR-010, barcos no Tocantins e um avião na pista, com sombra que cai no chão e sobe pelas edificações.
+- **Interação:** girar, arrastar e aproximar; botões Norte e Grade (vista alinhada à grade das ruas) e câmera em perspectiva opcional; duplo clique numa edificação mostra classe, pavimentos, bairro, via mais próxima, coordenadas e links para o Google Maps e o Street View; pixel art desligado, ao aproximar ou sempre, com tamanho do pixel regulável; tecla H esconde a interface para gravação de vídeo.
 
 ## Ressalvas
 
@@ -26,6 +27,7 @@ Versão 1.0.0 · novembro de 2026
 - O OpenStreetMap não permite distinguir com segurança asfalto, laterita e bloquete em Imperatriz: cerca de 80% da extensão das vias de carro não tem registro de pavimento e aparece como pavimentada por convenção. Calçadas, larguras e marcações seguem convenção por classe de via.
 - A AOI segue as edificações do Open Buildings V3; construções posteriores às imagens do modelo ficam fora (por exemplo, as fileiras do sudoeste do Conjunto Canto da Serra).
 - Árvores, veículos, vento e avião são ilustrativos: não correspondem a inventário arbóreo, contagem de tráfego nem voos reais.
+- Canteiros, árvores de calçada e de praça, janelas e iluminação noturna seguem convenções declaradas no script 03 (seção 2.11) e na página. Alguns lugares foram indicados pelo autor por conhecimento local (seção 2.12 do script 03); a calha do riacho é ilustrativa quando o OSM não registra o curso d'água.
 - A ressalva de cada execução, com os números daquela rodada, fica gravada em `data/processed/cena/metadados_cena.json` e aparece no painel *Fontes* da página.
 
 ## Estrutura
@@ -82,12 +84,15 @@ Detalhes por camada em `data/processed/LEIAME_DADOS.md`.
 
 Conceito *tiny[city]*, como isometric.nyc (Andy Coenen), tiny.london (Boris Starkov), tinygyn.com e tinyrj.com (Thomas M) e tiny.voltaredonda (Caio Campos).
 
+Na versão 1.1.0, a sombra do avião sobre as edificações veio do vídeo de Thomas M. sobre o tinyrj; o pixel art que entra ao aproximar, a vista alinhada à grade das ruas e o acabamento das copas, do Slop Toronto (iso.sloptoronto.ca); a noite com vias iluminadas e as janelas nas fachadas, do mapa do Paraná de Bruno César (#30DayMapChallenge).
+
 ## Como citar
 
 CARVALHO, A. E. F. B. **Imperatriz em miniatura**: maquete digital isométrica do núcleo urbano de Imperatriz (MA). Versão 1.0.0. Zenodo, 2026. DOI: [10.5281/zenodo.23962971](https://doi.org/10.5281/zenodo.23962971).
 
-- DOI desta versão (1.0.0): [10.5281/zenodo.23962971](https://doi.org/10.5281/zenodo.23962971)
 - DOI de todas as versões (aponta sempre para a mais recente): [10.5281/zenodo.23962970](https://doi.org/10.5281/zenodo.23962970)
+- DOI da versão 1.0.0: [10.5281/zenodo.23962971](https://doi.org/10.5281/zenodo.23962971)
+- DOI da versão 1.1.0: acrescentado após o depósito no Zenodo
 
 O botão *Cite this repository* do GitHub gera a citação a partir do arquivo `CITATION.cff`.
 

@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "Se usar este material, cite-o como abaixo."
 title: "Imperatriz em miniatura: maquete digital isométrica do núcleo urbano de Imperatriz (MA)"
-version: 1.0.0
-date-released: 2026-11-04
+version: 1.1.0
+date-released: 2026-11-14
 doi: 10.5281/zenodo.23962970
 identifiers:
   - type: doi

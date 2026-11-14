@@ -7,7 +7,7 @@
 #
 # Autor : Antonio Expedito Ferreira Barroso de Carvalho
 # Filia : UEMASUL — Universidade Estadual da Região Tocantina do Maranhão
-# Data  : novembro/2026
+# Data  : novembro/2026 (versão 1.1.0)
 # R     : 4.6.1
 # Email : expebarroso@uemasul.edu.br
 # ==============================================================================
@@ -39,6 +39,12 @@
 #   data/processed/cena/pedestres.geojson     piso vetorial: caminhos e ciclovias
 #   data/processed/cena/quadras.geojson       piso vetorial: AOI menos vias e calçadas
 #   data/processed/cena/faixas.geojson        piso vetorial: faixas de pedestre (pontos)
+#   data/processed/cena/verde_extra.geojson   canteiros e quadras vazias com grama (v1.1.0)
+#   data/processed/cena/arvores_pontos.geojson árvores em canteiros, calçadas, praças e
+#                                              casos indicados pelo autor (v1.1.0)
+#   data/processed/cena/campo.geojson         campo de futebol do estádio (v1.1.0)
+#   data/processed/cena/riacho.geojson        calha do riacho do caso 9 (v1.1.0)
+#   data/processed/cena/bairros.geojson       bairros do OSM, para a ficha (v1.1.0)
 #   data/processed/cena/metadados_cena.json   origem, parâmetros, contagens, créditos
 #   data/processed/cena_imperatriz_utm.gpkg    as mesmas camadas em EPSG:31983,
 #                                              para inspeção no QGIS
@@ -228,6 +234,107 @@ SIMPLIFICA_VERDE_M <- 5
 # Largura padrão (m) de pista e taxiway quando o OSM não informa a etiqueta
 # width; pátios (aeroway=apron) vêm como polígonos
 LARGURA_AEROVIA <- c(runway = 45, taxiway = 18)
+
+# 2.11 - Vegetação pontual (versão 1.1.0)
+# ------------------------------------------------------------------------------
+
+# Árvores em posições calculadas aqui (a página só as desenha), em quatro
+# regras, todas ilustrativas e declaradas na ressalva (seção 9.3):
+#   canteiros: quadras sem edificação e estreitas viram gramado; as de
+#     largura média igual ou maior que ARVORE_LARGURA_MIN_M recebem árvores
+#     ao longo do comprimento;
+#   calçadas: árvores junto ao meio-fio onde a faixa livre entre a via e a
+#     primeira fachada (calçada mais recuo) tem pelo menos
+#     ARVORE_LARGURA_MIN_M; só em frentes edificadas (fachada a até
+#     DIST_MAX_FACHADA_M), para não enfileirar árvores ao longo de terrenos
+#     vazios;
+#   praças do OSM (leisure = park ou garden): árvores espalhadas, fora dos
+#     caminhos e afastadas das edificações;
+#   casos indicados pelo autor (seção 2.12).
+
+# Largura média de uma quadra vazia: 2 x área / perímetro (para uma faixa
+# longa, é a própria largura). Abaixo deste limiar, a quadra vazia é canteiro.
+# PROVISÓRIO: conferir na tabela impressa pela seção 8.7.2 e no QGIS
+# (camada verde_extra) antes de fixar.
+CANTEIRO_LARGURA_MAX_M <- 20
+ARVORE_LARGURA_MIN_M   <- 4      # decisão do autor (08/11/2026)
+ESPACO_ARVORES_M       <- 12     # entre árvores de uma mesma fileira
+RECUO_CANTEIRO_M       <- 1.5    # distância das fileiras à borda do canteiro
+AFAST_MEIO_FIO_M       <- 1      # árvore de calçada: distância ao leito da via
+DIST_MAX_FACHADA_M     <- 15
+# só as avenidas (decisão do autor, 14/11/2026): nas ruas residenciais, a
+# faixa livre inclui o recuo frontal das casas, que é quintal particular, e a
+# regra gerava cerca de 80 mil árvores
+CLASSES_ARBORIZADAS    <- c("trunk", "primary", "secondary", "tertiary")
+ARVORES_PRACA_HA       <- 60     # árvores por hectare nas praças
+ARVORES_CASO_HA        <- 150    # nos casos indicados (seção 2.12), lugares pequenos
+FOLGA_LIVRE_M          <- 8      # casos indicados: faixa livre em volta das edificações
+AREA_MIN_LIVRE_M2      <- 300    # casos indicados: menor pedaço livre aceito
+AFAST_EDIF_ARVORE_M    <- 2      # folga entre árvore e edificação
+AFAST_CAMINHO_M        <- 1.5    # folga entre árvore e caminho de pedestre
+DIST_MIN_ARVORES_M     <- 5      # duas árvores mais próximas que isso: fica uma
+SEMENTE_ARVORES        <- 42
+
+# 2.12 - Casos indicados pelo autor (versão 1.1.0)
+# ------------------------------------------------------------------------------
+
+# Lugares conferidos pelo autor na cena, por conhecimento local, a partir do
+# duplo clique numa edificação vizinha (âncora; latitude e longitude do ponto
+# clicado, SIRGAS 2000). O tratamento de cada caso está na seção 8.7.6.
+#   tipo "quadra_arvores": a quadra vazia mais próxima da âncora (até
+#     RAIO_ANCORA_M) vira gramado com árvores espalhadas;
+#   tipo "fileira_oposta": a avenida que margeia essa quadra (excluída a rua
+#     da âncora) recebe uma fileira de árvores do lado oposto, ao longo da
+#     quadra vizinha;
+#   tipo "campo": o vazio cercado pelas edificações-âncora (arquibancadas)
+#     recebe gramado com marcação de campo de futebol;
+#   tipo "praca_frente": na praça mais próxima da âncora, árvores só nos
+#     N_FRENTE recortes (entre caminhos) mais próximos da âncora;
+#   tipo "riacho": na área verde mais próxima da âncora, calha sinuosa no
+#     meio e três fileiras de árvores de cada lado.
+# escolha: posição do candidato na lista impressa (1 = o mais próximo); se a
+# conferência no QGIS mostrar o lugar errado, troque para 2 ou 3.
+CASOS_INDICADOS <- data.frame(
+  caso    = c("0", "2", "2", "2", "3", "3", "7", "9"),
+  tipo    = c("quadra_arvores", "campo", "campo", "campo",
+              "quadra_arvores", "fileira_oposta", "praca_frente", "riacho"),
+  edificacao_ref = c(77626, 54668, 38159, 67082, 39534, 39534, 36559, 130688),
+  lat     = c(-5.520410, -5.524784, -5.525531, -5.525708, -5.525435, -5.525435, -5.534344, -5.486672),
+  lon     = c(-47.472002, -47.488661, -47.487907, -47.488946, -47.487276, -47.487276, -47.477685, -47.444718),
+  escolha = c(1, 1, 1, 1, 1, 1, 1, 1),
+  referencia = c("triângulo junto à marginal oeste da BR-010",
+                 "estádio: arquibancada norte", "estádio: arquibancada leste",
+                 "estádio: arquibancada oeste",
+                 "triângulo em frente à edificação", "avenida do outro lado do triângulo",
+                 "praça: só os 3 canteiros da frente", "faixa verde do riacho"),
+  stringsAsFactors = FALSE
+)
+RAIO_ANCORA_M      <- 40
+N_FRENTE           <- 3
+CAMPO_PROPORCAO    <- 1.55   # comprimento / largura de um campo oficial (105 x 68 m)
+CAMPO_COMPR_MAX_M  <- 105
+CAMPO_FOLGA_M      <- 3      # distância mínima do campo às arquibancadas
+RIACHO_FRACOES     <- c(0.25, 0.55, 0.85)   # fileiras: fração da meia largura
+RIACHO_AMPLITUDE   <- 0.18   # sinuosidade: fração da meia largura (máx. 6 m)
+RIACHO_ONDA_M      <- 70     # comprimento de onda da sinuosidade
+
+# 2.13 - Árvores indicadas pelo autor (versão 1.1.0)
+# ------------------------------------------------------------------------------
+
+# Árvores isoladas, conferidas pelo autor por conhecimento local e na imagem
+# de satélite, com altura e diâmetro de copa informados: a página desenha
+# cada uma nessas medidas, sem sorteio (seção 8.7.8). Posição em latitude e
+# longitude (SIRGAS 2000), obtida a partir do duplo clique em edificações
+# vizinhas.
+ARVORES_INDICADAS <- data.frame(
+  id         = c("uemasul_tamandare_1"),
+  lat        = c(-5.535988),
+  lon        = c(-47.483042),
+  altura_m   = c(15),
+  copa_m     = c(13),
+  referencia = c("UEMASUL, dentro do muro da Rua Tamandaré: em frente à edificação 55924 e a 22,5 m da 62970 ao longo da rua"),
+  stringsAsFactors = FALSE
+)
 
 
 # ------------------------------------------------------------------------------
@@ -573,7 +680,9 @@ eixos <- linhas_osm |>
       TRUE                                        ~ "nenhuma"
     )
   ) |>
-  dplyr::select(osm_id, classe, mao_unica, largura, pavimento, pav_informado, marcacao) |>
+  # nome: usado na ficha do duplo clique (via mais próxima, versão 1.1.0)
+  dplyr::mutate(nome = name) |>
+  dplyr::select(osm_id, nome, classe, mao_unica, largura, pavimento, pav_informado, marcacao) |>
   recortar() |>
   para_linhas() |>
   sf::st_simplify(dTolerance = SIMPLIFICA_M, preserveTopology = TRUE) |>
@@ -657,6 +766,7 @@ message("Rio (rota dos barcos): ", ifelse(is.null(rio), 0, nrow(rio)), " trecho(
 verde <- poligonos_osm |>
   dplyr::mutate(origem = dplyr::case_when(
     leisure %in% "park"   ~ "leisure=park",
+    leisure %in% "garden" ~ "leisure=garden",   # versão 1.1.0
     landuse %in% "grass"  ~ "landuse=grass",
     natural %in% "wood"   ~ "natural=wood",
     landuse %in% "forest" ~ "landuse=forest",
@@ -806,6 +916,510 @@ message("OSM: ", nrow(vias), " classes de via; ",
         "e manchas de gramado do Dynamic World)")
 
 
+# 8.7 - Vegetação pontual e casos indicados (versão 1.1.0)
+# ------------------------------------------------------------------------------
+
+# 8.7.0 - Funções auxiliares
+# ------------------------------------------------------------------------------
+
+# Pontos a cada "espaco" metros ao longo de uma linha (matriz x, y), com a
+# direção do segmento (ux, uy) em cada ponto
+amostrar_linha <- function(xy, espaco, inicio = espaco / 2) {
+  d <- sqrt(rowSums(diff(xy)^2))
+  if (length(d) == 0 || sum(d) < inicio) return(NULL)
+  ac <- c(0, cumsum(d))
+  s  <- seq(inicio, ac[length(ac)], by = espaco)
+  i  <- pmin(findInterval(s, ac, rightmost.closed = TRUE), length(d))
+  dd <- ifelse(d[i] > 0, d[i], 1)
+  f  <- (s - ac[i]) / dd
+  cbind(x  = xy[i, 1] + f * (xy[i + 1, 1] - xy[i, 1]),
+        y  = xy[i, 2] + f * (xy[i + 1, 2] - xy[i, 2]),
+        ux = (xy[i + 1, 1] - xy[i, 1]) / dd,
+        uy = (xy[i + 1, 2] - xy[i, 2]) / dd)
+}
+
+# Pontos a cada "espaco" metros ao longo de todas as linhas de uma geometria
+pontos_em_linhas <- function(geom, espaco) {
+  geom <- geom[!sf::st_is_empty(geom)]
+  if (length(geom) == 0) return(matrix(numeric(0), ncol = 2, dimnames = list(NULL, c("x", "y"))))
+  lin <- geom |> sf::st_cast("MULTILINESTRING") |> sf::st_cast("LINESTRING") |> suppressWarnings()
+  xy  <- sf::st_coordinates(lin)
+  partes <- split(seq_len(nrow(xy)), xy[, "L1"])
+  m <- do.call(rbind, lapply(partes, function(k) amostrar_linha(xy[k, 1:2, drop = FALSE], espaco)))
+  if (is.null(m)) return(matrix(numeric(0), ncol = 2, dimnames = list(NULL, c("x", "y"))))
+  m[, c("x", "y"), drop = FALSE]
+}
+
+# Matriz x, y -> pontos sf com a origem da árvore
+para_pontos <- function(m, origem) {
+  if (is.null(m) || nrow(m) == 0) return(NULL)
+  sf::st_as_sf(data.frame(x = m[, 1], y = m[, 2], origem = origem),
+               coords = c("x", "y"), crs = CRS_UTM)
+}
+
+# Distância de cada ponto à edificação mais próxima. st_nearest_feature usa
+# índice espacial e é rápido; st_is_within_distance, nesta versão do sf,
+# compara todos os pares (cerca de 100 s para 20 mil pontos no teste de
+# 09/11/2026) e por isso não é usado.
+dist_edificacao <- function(pts) {
+  viz <- sf::st_nearest_feature(pts, fp)
+  as.numeric(sf::st_distance(pts, fp[viz, ], by_element = TRUE))
+}
+
+# Descarta pontos sobre o leito das vias, na água, sobre caminhos de pedestre
+# ou a menos de "folga" metros de uma edificação. Os polígonos grandes (vias,
+# água) vêm primeiro em st_intersects, para que o GEOS os prepare uma vez.
+filtrar_pontos <- function(pts, folga = AFAST_EDIF_ARVORE_M, caminhos = TRUE) {
+  if (is.null(pts) || nrow(pts) == 0) return(pts)
+  fora <- rep(FALSE, nrow(pts))
+  fora[unlist(sf::st_intersects(vias, pts))] <- TRUE
+  if (!is.null(agua)) fora[unlist(sf::st_intersects(agua, pts))] <- TRUE
+  if (caminhos && !is.null(faixa_caminhos)) fora[unlist(sf::st_intersects(faixa_caminhos, pts))] <- TRUE
+  pts <- pts[!fora, ]
+  if (nrow(pts) == 0) return(pts)
+  pts[dist_edificacao(pts) > folga, ]
+}
+
+# Árvores espalhadas ao acaso dentro de polígonos, na densidade das praças
+espalhar <- function(poligonos, origem, densidade = ARVORES_PRACA_HA) {
+  if (is.null(poligonos) || length(poligonos) == 0) return(NULL)
+  area_ha <- as.numeric(sf::st_area(poligonos)) / 1e4
+  n <- pmax(2, round(area_ha * densidade * 1.5))   # sobra para os filtros
+  pts <- sf::st_sample(poligonos, size = n, type = "random") |> suppressMessages()
+  pts <- sf::st_sf(origem = origem, geometry = sf::st_cast(pts, "POINT")) |> suppressWarnings()
+  filtrar_pontos(pts)
+}
+
+# Fica um ponto por célula de DIST_MIN_ARVORES_M (rareamento simples)
+rarear <- function(pts) {
+  if (is.null(pts) || nrow(pts) == 0) return(pts)
+  xy <- sf::st_coordinates(pts)
+  pts[!duplicated(paste(floor(xy[, 1] / DIST_MIN_ARVORES_M), floor(xy[, 2] / DIST_MIN_ARVORES_M))), ]
+}
+
+# Caminhos de pedestre com folga, para afastar as árvores (seção 2.11)
+faixa_caminhos <- if (is.null(pedestres)) NULL else
+  sf::st_buffer(pedestres, pedestres$largura / 2 + AFAST_CAMINHO_M) |> sf::st_union() |> sf::st_sf()
+
+set.seed(SEMENTE_ARVORES)
+
+# 8.7.1 - Quadras vazias e largura média
+# ------------------------------------------------------------------------------
+
+# Vazia: nenhuma edificação toca a quadra. Largura média = 2 x área / perímetro
+quadras <- quadras |>
+  dplyr::mutate(
+    perimetro_m     = as.numeric(sf::st_length(sf::st_boundary(geometry))),
+    largura_media_m = 2 * area_m2 / perimetro_m,
+    vazia           = lengths(sf::st_intersects(geometry, fp)) == 0
+  )
+vazias <- quadras |> dplyr::filter(vazia)
+message("Quadras vazias: ", nrow(vazias), " de ", nrow(quadras))
+print(round(stats::quantile(vazias$largura_media_m, c(0.1, 0.25, 0.5, 0.75, 0.9)), 1))
+
+# 8.7.2 - Canteiros: tabela de limiares
+# ------------------------------------------------------------------------------
+
+# Quantas quadras vazias seriam canteiro em cada limiar de largura média.
+# CANTEIRO_LARGURA_MAX_M (seção 2.11) é provisório até a conferência desta
+# tabela e da camada verde_extra no QGIS.
+tab_canteiros <- data.frame(limiar_m = c(10, 15, 20, 25, 30))
+tab_canteiros$n  <- sapply(tab_canteiros$limiar_m, function(k) sum(vazias$largura_media_m < k))
+tab_canteiros$ha <- sapply(tab_canteiros$limiar_m, function(k)
+  round(sum(vazias$area_m2[vazias$largura_media_m < k]) / 1e4, 1))
+print(tab_canteiros)
+
+canteiros <- vazias |> dplyr::filter(largura_media_m < CANTEIRO_LARGURA_MAX_M)
+message("Canteiros (largura média < ", CANTEIRO_LARGURA_MAX_M, " m): ", nrow(canteiros))
+
+# 8.7.3 - Árvores dos canteiros
+# ------------------------------------------------------------------------------
+
+# Canteiros com largura média de pelo menos ARVORE_LARGURA_MIN_M: fileiras a
+# RECUO_CANTEIRO_M da borda (nos estreitos, as duas bordas recuadas se
+# encontram no meio e o rareamento deixa uma fileira só)
+arv_canteiro <- NULL
+cant_arv <- canteiros |> dplyr::filter(largura_media_m >= ARVORE_LARGURA_MIN_M)
+if (nrow(cant_arv) > 0) {
+  recuo  <- pmin(RECUO_CANTEIRO_M, cant_arv$largura_media_m / 2 - 0.5)
+  miolo  <- sf::st_buffer(sf::st_geometry(cant_arv), -recuo)
+  arv_canteiro <- pontos_em_linhas(sf::st_boundary(miolo), ESPACO_ARVORES_M) |>
+    para_pontos("canteiro") |> filtrar_pontos() |> rarear()
+}
+message("Árvores em canteiros: ", ifelse(is.null(arv_canteiro), 0, nrow(arv_canteiro)))
+
+# 8.7.4 - Árvores das calçadas (faixa livre de pelo menos 4 m)
+# ------------------------------------------------------------------------------
+
+# Candidatas a cada ESPACO_ARVORES_M dos dois lados de cada eixo, a
+# AFAST_MEIO_FIO_M além do leito (largura cheia da classe). Faixa livre =
+# AFAST_MEIO_FIO_M + distância até a fachada mais próxima. Ficam as
+# candidatas com faixa livre >= ARVORE_LARGURA_MIN_M e fachada a até
+# DIST_MAX_FACHADA_M.
+base_calc <- eixos |> dplyr::filter(classe %in% CLASSES_ARBORIZADAS)
+xy_e   <- sf::st_coordinates(base_calc)
+afast  <- unname(LARGURA_EIXO[base_calc$classe]) / 2 + AFAST_MEIO_FIO_M
+partes <- split(seq_len(nrow(xy_e)), xy_e[, "L1"])
+cand <- do.call(rbind, lapply(names(partes), function(l) {
+  a <- amostrar_linha(xy_e[partes[[l]], 1:2, drop = FALSE], ESPACO_ARVORES_M)
+  if (is.null(a)) return(NULL)
+  w <- afast[as.integer(l)]
+  rbind(cbind(a[, "x"] - a[, "uy"] * w, a[, "y"] + a[, "ux"] * w),
+        cbind(a[, "x"] + a[, "uy"] * w, a[, "y"] - a[, "ux"] * w))
+}))
+cand <- para_pontos(cand, "calcada")
+message("Candidatas nas calçadas: ", nrow(cand))
+cand <- filtrar_pontos(cand, folga = 0)
+d_fachada <- dist_edificacao(cand)
+faixa_livre <- AFAST_MEIO_FIO_M + d_fachada
+arv_calcada <- cand[faixa_livre >= ARVORE_LARGURA_MIN_M & d_fachada <= DIST_MAX_FACHADA_M, ] |> rarear()
+message("Árvores em calçadas: ", nrow(arv_calcada), " (faixa livre >= ", ARVORE_LARGURA_MIN_M,
+        " m e fachada a até ", DIST_MAX_FACHADA_M, " m)")
+
+# 8.7.5 - Praças do OSM
+# ------------------------------------------------------------------------------
+
+pracas <- poligonos_osm |>
+  dplyr::filter(leisure %in% c("park", "garden")) |>
+  dplyr::select(osm_id, nome = name) |>
+  recortar()
+if (!is.null(pracas)) {
+  pracas <- pracas |>
+    sf::st_collection_extract("POLYGON") |> suppressWarnings() |>
+    sf::st_cast("MULTIPOLYGON") |> sf::st_cast("POLYGON", warn = FALSE) |>
+    dplyr::mutate(area_m2 = as.numeric(sf::st_area(geometry))) |>
+    dplyr::filter(area_m2 >= 100) |>
+    # identificador próprio: praças mapeadas como contorno fechado (e não
+    # como relação) vêm do osmextract sem osm_id
+    dplyr::mutate(pid = dplyr::row_number())
+}
+message("Praças do OSM (leisure = park ou garden): ", ifelse(is.null(pracas), 0, nrow(pracas)))
+
+# 8.7.6 - Casos indicados pelo autor
+# ------------------------------------------------------------------------------
+
+casos <- sf::st_as_sf(CASOS_INDICADOS, coords = c("lon", "lat"), crs = 4326) |>
+  sf::st_transform(CRS_UTM)
+
+# Lista os candidatos mais próximos de uma âncora e devolve o escolhido
+escolher <- function(ancora, alvos, rotulo, escolha = 1, raio = RAIO_ANCORA_M) {
+  if (is.null(alvos) || nrow(alvos) == 0) { warning(rotulo, ": nenhum candidato"); return(NULL) }
+  d <- as.numeric(sf::st_distance(ancora, alvos))
+  o <- order(d)[seq_len(min(3, length(d)))]
+  tab <- data.frame(posicao = seq_along(o), dist_m = round(d[o], 1),
+                    area_m2 = round(as.numeric(sf::st_area(alvos[o, ]))),
+                    largura_media_m = if ("largura_media_m" %in% names(alvos)) round(alvos$largura_media_m[o], 1) else NA)
+  message(rotulo, ": candidatos")
+  print(tab)
+  if (d[o[escolha]] > raio) { warning(rotulo, ": candidato a mais de ", raio, " m da âncora"); return(NULL) }
+  alvos[o[escolha], ]
+}
+
+# classes em ordem de importância (para escolher a avenida do caso 3)
+ORDEM_CLASSES <- c("trunk", "primary", "secondary", "tertiary", "unclassified",
+                   "residential", "living_street", "service", "track")
+
+# lado (+1 esquerda, -1 direita) de um ponto em relação ao segmento mais
+# próximo de uma linha
+lado_de <- function(p, xy) {
+  mid <- (xy[-1, , drop = FALSE] + xy[-nrow(xy), , drop = FALSE]) / 2
+  k <- which.min((mid[, 1] - p[1])^2 + (mid[, 2] - p[2])^2)
+  sign((xy[k + 1, 1] - xy[k, 1]) * (p[2] - xy[k, 2]) - (xy[k + 1, 2] - xy[k, 2]) * (p[1] - xy[k, 1]))
+}
+
+verde_casos   <- list()   # polígonos que viram gramado
+arv_casos     <- list()   # árvores dos casos
+campo         <- NULL
+riacho        <- NULL
+pracas_excluidas <- integer(0)   # praças tratadas à parte (caso praca_frente)
+quadra_caso   <- list()   # quadra escolhida por caso (usada pela fileira oposta)
+registro      <- list()   # geometrias escolhidas, para conferência no QGIS
+
+for (i in seq_len(nrow(casos))) {
+  cs <- casos[i, ]
+  rot <- paste0("Caso ", cs$caso, " (", cs$referencia, ")")
+
+  if (cs$tipo == "quadra_arvores") {
+    # primeiro, as quadras vazias; se nenhuma estiver a até RAIO_ANCORA_M,
+    # o espaço livre dentro das quadras vizinhas: a quadra menos uma faixa
+    # de FOLGA_LIVRE_M em volta de cada edificação, e o pedaço livre mais
+    # próximo da âncora com pelo menos AREA_MIN_LIVRE_M2. Excluída a quadra
+    # da própria âncora. Caso típico: lugar vazio cujo lado não tem via de
+    # carro no OSM e que, por isso, ficou fundido numa quadra com casas
+    # (caso 3 na rodada de 14/11/2026: pedaço de 3.980 m² a 22,3 m)
+    q <- suppressWarnings(escolher(cs, vazias, rot, cs$escolha))
+    if (is.null(q)) {
+      viz <- quadras[as.numeric(sf::st_distance(quadras, cs)) <= RAIO_ANCORA_M &
+                       lengths(sf::st_intersects(quadras, cs)) == 0, ]
+      if (nrow(viz) > 0) {
+        edif  <- fp[lengths(sf::st_intersects(fp, sf::st_union(viz))) > 0, ]
+        livre <- sf::st_union(viz)
+        if (nrow(edif) > 0) livre <- sf::st_difference(livre, sf::st_union(sf::st_buffer(edif, FOLGA_LIVRE_M)))
+        livre <- livre |> sf::st_collection_extract("POLYGON") |> sf::st_cast("POLYGON") |> suppressWarnings()
+        livre <- livre[as.numeric(sf::st_area(livre)) >= AREA_MIN_LIVRE_M2]
+        if (length(livre) > 0) {
+          livre <- sf::st_sf(area_m2 = as.numeric(sf::st_area(livre)), geometry = livre)
+          q <- escolher(cs, livre, paste0(rot, " [espaço livre nas quadras vizinhas]"), cs$escolha)
+        } else warning(rot, ": nenhum espaço livre nas quadras vizinhas")
+      }
+    }
+    if (is.null(q)) next
+    quadra_caso[[cs$caso]] <- q
+    verde_casos[[length(verde_casos) + 1]] <- sf::st_sf(origem = paste0("caso_", cs$caso), geometry = sf::st_geometry(q))
+    arv_casos[[length(arv_casos) + 1]] <- espalhar(sf::st_geometry(q), paste0("caso_", cs$caso), ARVORES_CASO_HA)
+    registro[[length(registro) + 1]] <- sf::st_sf(caso = cs$caso, tipo = cs$tipo, geometry = sf::st_geometry(q))
+  }
+
+  if (cs$tipo == "fileira_oposta") {
+    tri <- quadra_caso[[cs$caso]]
+    if (is.null(tri)) { warning(rot, ": quadra do caso não encontrada"); next }
+    # eixos que margeiam a quadra; a rua da âncora é a mais próxima da âncora
+    adj <- eixos[lengths(sf::st_is_within_distance(eixos, tri, dist = 12)) > 0, ]
+    if (nrow(adj) < 2) { warning(rot, ": menos de duas vias em volta da quadra"); next }
+    rua_ancora <- adj$osm_id[which.min(as.numeric(sf::st_distance(cs, adj)))]
+    outras <- adj[adj$osm_id != rua_ancora, ]
+    outras$ordem <- match(outras$classe, ORDEM_CLASSES)
+    faixa_tri <- sf::st_buffer(sf::st_geometry(tri), 12)
+    outras$compr <- vapply(seq_len(nrow(outras)), function(k)
+      sum(as.numeric(sf::st_length(sf::st_intersection(sf::st_geometry(outras)[k], faixa_tri)))), numeric(1)) |>
+      suppressWarnings()
+    av_id <- outras$osm_id[order(outras$ordem, -outras$compr)][1]
+    aven  <- eixos[eixos$osm_id == av_id, ]
+    message(rot, ": avenida osm_id ", av_id, " (", aven$classe[1], ", ", aven$nome[1], ")")
+    # quadra do outro lado da avenida, junto ao trecho que margeia o triângulo
+    # coordenadas do trecho mais longo da avenida (após a fusão dos pedaços)
+    partes_av <- sf::st_union(aven) |> sf::st_cast("MULTILINESTRING") |> sf::st_line_merge() |>
+      sf::st_cast("LINESTRING") |> suppressWarnings()
+    xy_av <- sf::st_coordinates(partes_av[which.max(as.numeric(sf::st_length(partes_av)))])[, 1:2]
+    lado_tri <- lado_de(sf::st_coordinates(sf::st_centroid(tri))[1, ], xy_av)
+    perto_av <- quadras[lengths(sf::st_is_within_distance(quadras,
+                          sf::st_intersection(sf::st_union(aven), sf::st_buffer(tri, 40)),
+                          dist = max(aven$largura) / 2 + CALCADA_M + 2)) > 0, ]
+    perto_av <- perto_av[!sf::st_equals(perto_av, tri, sparse = FALSE)[, 1], ]
+    perto_av$lado <- vapply(seq_len(nrow(perto_av)), function(k)
+      lado_de(sf::st_coordinates(sf::st_point_on_surface(perto_av[k, ]))[1, ], xy_av), numeric(1)) |> suppressWarnings()
+    oposta <- perto_av[perto_av$lado == -lado_tri, ]
+    if (nrow(oposta) == 0) { warning(rot, ": quadra oposta não encontrada"); next }
+    oposta <- oposta[which.min(as.numeric(sf::st_distance(sf::st_centroid(tri), oposta))), ]
+    # fileira: o eixo da avenida ao longo da quadra oposta, deslocado para o
+    # lado dela, a meia largura cheia da via mais AFAST_MEIO_FIO_M
+    w   <- unname(LARGURA_EIXO[aven$classe[1]]) / 2 + AFAST_MEIO_FIO_M
+    tre <- sf::st_intersection(sf::st_union(aven), sf::st_buffer(oposta, max(aven$largura) / 2 + CALCADA_M + 1)) |>
+      sf::st_cast("MULTILINESTRING") |> sf::st_cast("LINESTRING") |> suppressWarnings()
+    xy  <- sf::st_coordinates(tre)
+    sinal <- -lado_tri
+    fil <- do.call(rbind, lapply(split(seq_len(nrow(xy)), xy[, "L1"]), function(k) {
+      a <- amostrar_linha(xy[k, 1:2, drop = FALSE], ESPACO_ARVORES_M)
+      if (is.null(a)) return(NULL)
+      cbind(a[, "x"] - a[, "uy"] * w * sinal, a[, "y"] + a[, "ux"] * w * sinal)
+    }))
+    arv_casos[[length(arv_casos) + 1]] <- para_pontos(fil, paste0("caso_", cs$caso)) |> filtrar_pontos(folga = 1)
+    message(rot, ": fileira de ", nrow(arv_casos[[length(arv_casos)]]), " árvores ao longo da quadra oposta")
+    registro[[length(registro) + 1]] <- sf::st_sf(caso = cs$caso, tipo = cs$tipo, geometry = sf::st_geometry(oposta))
+  }
+
+  if (cs$tipo == "campo" && is.null(campo)) {
+    anc <- casos[casos$tipo == "campo", ]
+    qi  <- unique(unlist(sf::st_intersects(anc, quadras)))
+    if (length(qi) == 0) qi <- unique(sf::st_nearest_feature(anc, quadras))
+    q_est <- sf::st_union(quadras[qi, ])
+    arquib <- fp[lengths(sf::st_intersects(fp, q_est)) > 0, ]
+    livre <- sf::st_difference(q_est, sf::st_union(sf::st_buffer(arquib, CAMPO_FOLGA_M))) |>
+      sf::st_collection_extract("POLYGON") |> sf::st_cast("POLYGON") |> suppressWarnings()
+    livre <- livre[which.max(as.numeric(sf::st_area(livre)))]
+    # orientação: lado maior do retângulo mínimo que envolve o vazio
+    cm <- sf::st_coordinates(sf::st_minimum_rotated_rectangle(livre))[1:4, 1:2]
+    e1 <- cm[2, ] - cm[1, ]; e2 <- cm[3, ] - cm[2, ]
+    u  <- if (sqrt(sum(e1^2)) >= sqrt(sum(e2^2))) e1 / sqrt(sum(e1^2)) else e2 / sqrt(sum(e2^2))
+    n  <- c(-u[2], u[1])
+    retangulo <- function(c0, larg) {
+      comp <- min(larg * CAMPO_PROPORCAO, CAMPO_COMPR_MAX_M)
+      p <- rbind(c0 - u * comp / 2 - n * larg / 2, c0 + u * comp / 2 - n * larg / 2,
+                 c0 + u * comp / 2 + n * larg / 2, c0 - u * comp / 2 + n * larg / 2)
+      sf::st_sfc(sf::st_polygon(list(rbind(p, p[1, ]))), crs = CRS_UTM)
+    }
+    # maior campo que cabe no vazio, testando três centros possíveis
+    centros <- rbind(colMeans(cm),
+                     sf::st_coordinates(sf::st_centroid(livre))[1, ],
+                     sf::st_coordinates(sf::st_point_on_surface(livre))[1, ])
+    melhor <- NULL; larg_melhor <- 0
+    for (k in seq_len(nrow(centros))) {
+      # largura máxima: a do campo oficial (105 / 1,55 = cerca de 68 m)
+      lo <- 5; hi <- CAMPO_COMPR_MAX_M / CAMPO_PROPORCAO
+      if (!sf::st_covers(livre, retangulo(centros[k, ], lo), sparse = FALSE)[1, 1]) next
+      for (it in 1:25) { m <- (lo + hi) / 2
+        if (sf::st_covers(livre, retangulo(centros[k, ], m), sparse = FALSE)[1, 1]) lo <- m else hi <- m }
+      if (lo > larg_melhor) { larg_melhor <- lo; melhor <- centros[k, ] }
+    }
+    if (is.null(melhor)) {
+      warning("Caso 2 (estádio): o vazio entre as arquibancadas não comporta um campo")
+    } else {
+      comp <- min(larg_melhor * CAMPO_PROPORCAO, CAMPO_COMPR_MAX_M)
+      campo <- sf::st_sf(comprimento = round(comp, 1), largura = round(larg_melhor, 1),
+                         angulo = atan2(u[2], u[1]), geometry = retangulo(melhor, larg_melhor))
+      message("Caso 2 (estádio): campo de ", round(comp, 1), " x ", round(larg_melhor, 1), " m")
+      registro[[length(registro) + 1]] <- sf::st_sf(caso = "2", tipo = "campo", geometry = sf::st_geometry(campo))
+    }
+  }
+
+  if (cs$tipo == "praca_frente") {
+    if (is.null(pracas)) { warning(rot, ": nenhuma praça do OSM"); next }
+    pr <- escolher(cs, pracas, rot, cs$escolha, raio = 60)
+    if (is.null(pr)) next
+    pracas_excluidas <- c(pracas_excluidas, pr$pid)
+    # recortes da praça entre os caminhos de pedestre
+    rec <- sf::st_geometry(pr)
+    if (!is.null(pedestres)) {
+      cam <- pedestres[lengths(sf::st_intersects(pedestres, sf::st_buffer(pr, 5))) > 0, ]
+      if (nrow(cam) > 0) rec <- sf::st_difference(rec, sf::st_union(sf::st_buffer(cam, cam$largura / 2 + 0.3)))
+    }
+    rec <- rec |> sf::st_collection_extract("POLYGON") |> sf::st_cast("POLYGON") |> suppressWarnings()
+    rec <- rec[as.numeric(sf::st_area(rec)) >= 20]
+    d <- as.numeric(sf::st_distance(cs, rec))
+    frente <- rec[order(d)[seq_len(min(N_FRENTE, length(rec)))]]
+    message(rot, ": ", length(rec), " recortes entre caminhos; árvores nos ", length(frente),
+            " mais próximos da âncora (", paste(round(sort(d)[seq_along(frente)], 1), collapse = ", "), " m)")
+    arv_casos[[length(arv_casos) + 1]] <- espalhar(frente, paste0("caso_", cs$caso), ARVORES_CASO_HA)
+    registro[[length(registro) + 1]] <- sf::st_sf(caso = cs$caso, tipo = cs$tipo, geometry = sf::st_union(frente))
+  }
+
+  if (cs$tipo == "riacho") {
+    alvos_v <- verde |> sf::st_cast("MULTIPOLYGON") |> sf::st_cast("POLYGON", warn = FALSE) |> suppressWarnings()
+    vp <- escolher(cs, alvos_v, rot, cs$escolha, raio = 100)
+    if (is.null(vp)) next
+    poli <- sf::st_geometry(vp)
+    # calha: o curso d'água do OSM dentro da área, se houver; senão, uma linha
+    # pelo meio da faixa, com sinuosidade ilustrativa
+    curso <- linhas_osm |> dplyr::filter(waterway %in% c("stream", "ditch", "drain", "canal"))
+    curso <- if (nrow(curso) > 0) sf::st_intersection(sf::st_geometry(curso), poli) |> suppressWarnings() else NULL
+    cm <- sf::st_coordinates(sf::st_minimum_rotated_rectangle(poli))[1:4, 1:2]
+    e1 <- cm[2, ] - cm[1, ]; e2 <- cm[3, ] - cm[2, ]
+    if (sqrt(sum(e1^2)) >= sqrt(sum(e2^2))) { u <- e1; L <- sqrt(sum(e1^2)); W <- sqrt(sum(e2^2)) } else
+                                            { u <- e2; L <- sqrt(sum(e2^2)); W <- sqrt(sum(e1^2)) }
+    u <- u / sqrt(sum(u^2)); n <- c(-u[2], u[1]); c0 <- colMeans(cm)
+    # cortes transversais a cada ESPACO_ARVORES_M: pontas e meio da faixa
+    est <- seq(-L / 2 + ESPACO_ARVORES_M / 2, L / 2 - ESPACO_ARVORES_M / 2, by = ESPACO_ARVORES_M)
+    cortes <- lapply(est, function(s) {
+      p0 <- c0 + u * s
+      seg <- sf::st_sfc(sf::st_linestring(rbind(p0 - n * W, p0 + n * W)), crs = CRS_UTM)
+      x <- sf::st_intersection(seg, poli) |> suppressWarnings()
+      if (length(x) == 0 || sf::st_is_empty(x)) return(NULL)
+      x <- x |> sf::st_cast("MULTILINESTRING") |> sf::st_cast("LINESTRING") |> suppressWarnings()
+      x <- x[which.max(as.numeric(sf::st_length(x)))]
+      xy <- sf::st_coordinates(x)[, 1:2]
+      a <- xy[1, ]; b <- xy[nrow(xy), ]
+      if (sum((b - a) * n) < 0) { tmp <- a; a <- b; b <- tmp }
+      c(s = s, ax = unname(a[1]), ay = unname(a[2]), bx = unname(b[1]), by = unname(b[2]))
+    })
+    cortes <- do.call(rbind, cortes)
+    if (is.null(cortes) || nrow(cortes) < 3) { warning(rot, ": faixa curta demais"); next }
+    meio <- cbind((cortes[, "ax"] + cortes[, "bx"]) / 2, (cortes[, "ay"] + cortes[, "by"]) / 2)
+    meia <- sqrt((cortes[, "bx"] - cortes[, "ax"])^2 + (cortes[, "by"] - cortes[, "ay"])^2) / 2
+    # suavização do meio (média móvel de 5 cortes)
+    suave <- function(v) { k <- stats::filter(v, rep(1 / 5, 5), sides = 2); ifelse(is.na(k), v, k) }
+    meio <- cbind(suave(meio[, 1]), suave(meio[, 2]))
+    amp  <- pmin(RIACHO_AMPLITUDE * meia, 6)
+    desl <- amp * sin(2 * pi * cortes[, "s"] / RIACHO_ONDA_M)
+    calha_xy <- meio + outer(desl, n)
+    if (!is.null(curso) && length(curso) > 0 && sum(as.numeric(sf::st_length(curso))) > 0.5 * L) {
+      riacho <- sf::st_sf(origem = "osm", geometry = sf::st_union(curso))
+      message(rot, ": calha pelo curso d'água do OSM")
+    } else {
+      riacho <- sf::st_sf(origem = "ilustrativa",
+                          geometry = sf::st_sfc(sf::st_linestring(calha_xy), crs = CRS_UTM))
+      message(rot, ": calha ilustrativa pelo meio da faixa (", round(L), " m; meia largura mediana ",
+              round(stats::median(meia), 1), " m)")
+    }
+    # três fileiras de cada lado, em frações da distância da calha à borda
+    fil <- do.call(rbind, lapply(seq_len(nrow(cortes)), function(k) {
+      ca <- calha_xy[k, ]
+      dl <- sqrt(sum((ca - cortes[k, c("ax", "ay")])^2)); dr <- sqrt(sum((cortes[k, c("bx", "by")] - ca)^2))
+      rbind(t(sapply(RIACHO_FRACOES, function(f) ca - n * f * dl)),
+            t(sapply(RIACHO_FRACOES, function(f) ca + n * f * dr)))
+    }))
+    arv_casos[[length(arv_casos) + 1]] <- para_pontos(fil, paste0("caso_", cs$caso)) |> filtrar_pontos()
+    registro[[length(registro) + 1]] <- sf::st_sf(caso = cs$caso, tipo = cs$tipo, geometry = poli)
+  }
+}
+
+# 8.7.7 - Árvores das praças (regra geral) e reunião dos pontos
+# ------------------------------------------------------------------------------
+
+arv_pracas <- NULL
+if (!is.null(pracas) && nrow(pracas) > 0) {
+  pr_geral <- pracas[!pracas$pid %in% pracas_excluidas, ]
+  arv_pracas <- espalhar(sf::st_geometry(pr_geral), "praca")
+  # onde o Dynamic World já pôs arvoredo, a página planta as próprias árvores
+  if (!is.null(arvoredo) && nrow(arvoredo) > 0 && nrow(arv_pracas) > 0) {
+    sob_arvoredo <- unique(unlist(sf::st_intersects(arvoredo, arv_pracas)))
+    if (length(sob_arvoredo)) arv_pracas <- arv_pracas[-sob_arvoredo, ]
+  }
+  arv_pracas <- rarear(arv_pracas)
+  # a densidade final não passa de ARVORES_PRACA_HA
+  alvo_n <- round(sum(as.numeric(sf::st_area(pr_geral))) / 1e4 * ARVORES_PRACA_HA)
+  if (nrow(arv_pracas) > alvo_n) arv_pracas <- arv_pracas[sort(sample(nrow(arv_pracas), alvo_n)), ]
+}
+
+# rbind (e não bind_rows) preserva a classe sf; as listas vazias são retiradas
+juntar <- function(lista) {
+  lista <- Filter(function(x) !is.null(x) && nrow(x) > 0, lista)
+  if (length(lista) == 0) NULL else do.call(rbind, lista)
+}
+arvores_pontos <- juntar(c(list(arv_canteiro, arv_calcada, arv_pracas), arv_casos)) |> rarear()
+message("Árvores pontuais por origem:")
+print(table(arvores_pontos$origem))
+
+# 8.7.8 - Árvores indicadas pelo autor (seção 2.13)
+# ------------------------------------------------------------------------------
+
+# Entram depois do rareamento, para não serem descartadas; as árvores
+# automáticas a menos de DIST_MIN_ARVORES_M de uma indicada saem. Altura e
+# copa só são preenchidas nas indicadas; nas demais ficam vazias e a página
+# sorteia as medidas.
+if (!is.null(arvores_pontos)) {
+  arvores_pontos$altura_m <- NA_real_
+  arvores_pontos$copa_m   <- NA_real_
+}
+if (nrow(ARVORES_INDICADAS) > 0) {
+  arv_indicadas <- sf::st_as_sf(ARVORES_INDICADAS, coords = c("lon", "lat"), crs = 4326) |>
+    sf::st_transform(CRS_UTM) |>
+    dplyr::transmute(origem = "indicada", altura_m, copa_m)
+  if (!is.null(arvores_pontos)) {
+    # árvores automáticas próximas demais de uma indicada
+    perto <- unique(unlist(sf::st_is_within_distance(arv_indicadas, arvores_pontos, DIST_MIN_ARVORES_M)))
+    if (length(perto)) arvores_pontos <- arvores_pontos[-perto, ]
+  }
+  arvores_pontos <- juntar(list(arvores_pontos, arv_indicadas))
+  message("Árvores indicadas pelo autor: ", nrow(arv_indicadas))
+}
+
+# Gramado extra: canteiros e quadras dos casos indicados (sem repetir quadras)
+verde_extra <- juntar(c(list(if (nrow(canteiros)) sf::st_sf(origem = "canteiro", geometry = sf::st_geometry(canteiros)) else NULL),
+                       verde_casos))
+if (!is.null(verde_extra)) verde_extra <- verde_extra[!duplicated(sf::st_as_text(sf::st_geometry(verde_extra))), ]
+casos_registro <- juntar(registro)
+
+# 8.8 - Bairros (ficha do duplo clique)
+# ------------------------------------------------------------------------------
+
+# Polígonos de bairro do OSM (limite administrativo de nível 10 ou place =
+# suburb/neighbourhood/quarter); sem polígonos, os pontos place da camada de
+# pontos servem de aproximação (a página mostra o bairro do ponto mais próximo)
+bairros <- poligonos_osm |>
+  dplyr::filter((boundary %in% "administrative" & admin_level %in% "10") |
+                place %in% c("suburb", "neighbourhood", "quarter")) |>
+  dplyr::filter(!is.na(name)) |>
+  dplyr::select(nome = name) |>
+  recortar()
+if (!is.null(bairros)) bairros <- bairros |> sf::st_collection_extract("POLYGON") |> suppressWarnings()
+bairros_pontos <- pontos_osm |>
+  dplyr::filter(place %in% c("suburb", "neighbourhood", "quarter"), !is.na(name)) |>
+  dplyr::select(nome = name)
+if (nrow(bairros_pontos) == 0) bairros_pontos <- NULL
+message("Bairros do OSM: ", ifelse(is.null(bairros), 0, nrow(bairros)), " polígonos; ",
+        ifelse(is.null(bairros_pontos), 0, nrow(bairros_pontos)), " pontos")
+
+
 # ------------------------------------------------------------------------------
 # 9. - Exportação
 # ------------------------------------------------------------------------------
@@ -832,7 +1446,15 @@ camadas <- list(
   arvoredo    = arvoredo,
   pistas      = pistas,
   patios      = patios,
-  rio         = rio
+  rio         = rio,
+  verde_extra = verde_extra,
+  arvores_pontos = arvores_pontos,
+  campo       = campo,
+  riacho      = riacho,
+  bairros     = bairros,
+  bairros_pontos = bairros_pontos,
+  casos_indicados = casos_registro,
+  ancoras     = casos
 )
 camadas <- Filter(Negate(is.null), camadas)
 
@@ -860,7 +1482,7 @@ camadas_cena <- list(
   aoi         = aoi |> dplyr::select(nome),
   edificacoes = fp  |> dplyr::select(id, tipo, pav, h_cena, z_base, imputado),
   vias        = vias |> dplyr::select(classe, largura),
-  eixos       = eixos |> dplyr::select(classe, largura, mao_unica, pavimento, marcacao),
+  eixos       = eixos |> dplyr::select(nome, classe, largura, mao_unica, pavimento, marcacao),
   pedestres   = if (is.null(pedestres)) NULL else dplyr::select(pedestres, classe, largura),
   quadras     = quadras |> dplyr::select(),
   faixas      = faixas,
@@ -869,8 +1491,20 @@ camadas_cena <- list(
   arvoredo    = arvoredo,
   pistas      = pistas,
   patios      = patios,
-  rio         = rio
+  rio         = rio,
+  verde_extra = verde_extra,
+  arvores_pontos = arvores_pontos,
+  campo       = campo,
+  riacho      = riacho,
+  bairros     = bairros,
+  bairros_pontos = bairros_pontos
 )
+# camadas opcionais da versão 1.1.0 que esta execução não produziu: o arquivo
+# de uma execução anterior é apagado, para a página não mostrar dado antigo
+for (nm in c("verde_extra", "arvores_pontos", "campo", "riacho", "bairros", "bairros_pontos")) {
+  arq <- file.path(dir_cena, paste0(nm, ".geojson"))
+  if (is.null(camadas_cena[[nm]]) && file.exists(arq)) file.remove(arq)
+}
 camadas_cena <- Filter(Negate(is.null), camadas_cena)
 
 # COORDINATE_PRECISION=1 grava coordenadas com 1 casa decimal (10 cm),
@@ -903,7 +1537,10 @@ metadados <- list(
     galpao_pav_max = GALPAO_PAV_MAX, vertical_pav_min = VERTICAL_PAV_MIN,
     telhado_m = TELHADO_M, margem_agua_m = MARGEM_AGUA_M,
     calcada_m = CALCADA_M, fator_mao_unica = FATOR_MAO_UNICA,
-    usar_relevo = USAR_RELEVO, janela_relevo_pix = JANELA_RELEVO
+    usar_relevo = USAR_RELEVO, janela_relevo_pix = JANELA_RELEVO,
+    canteiro_largura_max_m = CANTEIRO_LARGURA_MAX_M, arvore_largura_min_m = ARVORE_LARGURA_MIN_M,
+    espaco_arvores_m = ESPACO_ARVORES_M, dist_max_fachada_m = DIST_MAX_FACHADA_M,
+    arvores_praca_ha = ARVORES_PRACA_HA
   ),
   contagens   = list(
     edificacoes = nrow(fp),
@@ -913,7 +1550,10 @@ metadados <- list(
     desnivel_max_m    = max(fp$z_base),
     km_eixos          = round(sum(eixos$km), 1),
     km_por_pavimento  = as.list(km_por_pavimento),
-    pct_pav_informado = pct_pav_informado
+    pct_pav_informado = pct_pav_informado,
+    canteiros         = nrow(canteiros),
+    arvores_pontuais  = if (is.null(arvores_pontos)) list() else as.list(table(arvores_pontos$origem)),
+    campo_m           = if (is.null(campo)) NULL else c(campo$comprimento, campo$largura)
   ),
   # Ressalvas exibidas no painel "Fontes" da página; os números vêm desta execução
   ressalvas   = c(
@@ -934,12 +1574,20 @@ metadados <- list(
     paste0("Árvores e gramados: classificação Dynamic World de ", ANO,
            " (classe mais frequente no ano, 10 m); manchas de árvores e de gramado ",
            "com pelo menos ", AREA_MIN_ARVOREDO_M2 / 1e4, " ha. As árvores da cena são ",
-           "ilustrativas (densidade convencional), não um inventário arbóreo.")
+           "ilustrativas (densidade convencional), não um inventário arbóreo."),
+    paste0("Canteiros, calçadas e praças (versão 1.1.0): canteiros são quadras sem edificação ",
+           "com largura média abaixo de ", CANTEIRO_LARGURA_MAX_M, " m, pintadas como gramado; ",
+           "recebem árvores os canteiros com pelo menos ", ARVORE_LARGURA_MIN_M, " m e as calçadas das ",
+           "avenidas (vias trunk, primary, secondary e tertiary do OSM) com faixa livre (calçada mais recuo até a fachada) de pelo menos ", ARVORE_LARGURA_MIN_M,
+           " m; as praças do OSM recebem árvores espalhadas. Posições e espaçamentos são convenções ",
+           "visuais. Alguns lugares (praças, um estádio e a faixa de um riacho) foram indicados pelo ",
+           "autor por conhecimento local; a calha do riacho é ilustrativa quando o OSM não registra ",
+           "o curso d'água.")
   ),
   creditos    = c(
     "Edificações: Google Open Buildings V3 e 2.5D Temporal (CC-BY 4.0)",
     "Relevo: produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
-    "Vias, água, verde, ferrovia e aeroporto: © colaboradores do OpenStreetMap (ODbL)",
+    "Vias e nomes de vias, água, verde, praças, bairros, ferrovia e aeroporto: © colaboradores do OpenStreetMap (ODbL)",
     "Árvores e gramados: Dynamic World V1, produzido para o Dynamic World Project pelo Google em parceria com a National Geographic Society e o World Resources Institute (CC-BY 4.0)",
     "Recorte: densidade das edificações do Open Buildings V3; limite municipal IBGE 2020, via geobr (Ipea)"
   )
